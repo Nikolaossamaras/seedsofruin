@@ -25,6 +25,14 @@ namespace SoR.Gameplay
             _dodgeDistance = dodgeDistance;
         }
 
+        /// <summary>
+        /// Allows runtime-created objects to wire the CharacterController from code.
+        /// </summary>
+        public void SetCharacterController(CharacterController cc)
+        {
+            _characterController = cc;
+        }
+
         public void Move(Vector3 direction)
         {
             if (_characterController == null || direction.sqrMagnitude < 0.01f)

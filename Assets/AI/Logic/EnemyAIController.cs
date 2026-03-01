@@ -155,5 +155,26 @@ namespace SoR.AI
                 _definition != null ? _definition.EnemyId : string.Empty
             ));
         }
+
+        /// <summary>
+        /// Allows runtime-created enemies to wire their definition from code.
+        /// </summary>
+        public void SetDefinition(EnemyDefinitionSO definition)
+        {
+            _definition = definition;
+            _currentHealth = definition != null ? definition.MaxHealth : 0f;
+            _currentStagger = 0f;
+            _isDead = false;
+        }
+
+        /// <summary>
+        /// Resets health to max for respawning.
+        /// </summary>
+        public void ResetHealth()
+        {
+            _currentHealth = MaxHealth;
+            _currentStagger = 0f;
+            _isDead = false;
+        }
     }
 }

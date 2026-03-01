@@ -47,8 +47,20 @@ namespace SoR.Gameplay
 
         private void Start()
         {
-            _combatSystem = ServiceLocator.Resolve<CombatSystem>();
+            if (ServiceLocator.TryResolve<CombatSystem>(out var combat))
+                _combatSystem = combat;
+
             _stateMachine.ChangeState(IdleState);
+        }
+
+        /// <summary>
+        /// Allows runtime-created players to wire serialized references from code.
+        /// </summary>
+        public void SetupReferences(PlayerStatsSO data, PlayerMovement movement, PlayerView view)
+        {
+            _baseData = data;
+            _movement = movement;
+            _view = view;
         }
 
         private void Update()
