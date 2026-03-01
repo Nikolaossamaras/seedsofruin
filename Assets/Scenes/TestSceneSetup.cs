@@ -60,9 +60,9 @@ namespace SoR.Testing
 
         private void Start()
         {
-            _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             if (_font == null)
-                _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
             SetupCombatSystem();
             CreateGround();
@@ -568,17 +568,18 @@ namespace SoR.Testing
 
         private static Material CreateMaterial(Color color)
         {
-            // Try URP first, fall back to Standard/Diffuse
-            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            // URP Lit needs keyword/property setup to avoid magenta.
+            // URP Unlit just works with _BaseColor — perfect for placeholder visuals.
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Unlit/Color");
             if (shader == null) shader = Shader.Find("Standard");
-            if (shader == null) shader = Shader.Find("Diffuse");
 
             var mat = new Material(shader);
-            mat.color = color;
 
-            // URP Lit uses _BaseColor instead of _Color
             if (mat.HasProperty("_BaseColor"))
                 mat.SetColor("_BaseColor", color);
+            if (mat.HasProperty("_Color"))
+                mat.SetColor("_Color", color);
 
             return mat;
         }
