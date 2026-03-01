@@ -291,6 +291,155 @@ namespace SoR.Testing
                 },
                 new[] { ("ancient_seed", 1, 300, 75) }));
 
+            // --- Main Story quest chain (Greenreach → Withered Heart) ---
+
+            var elderQuest = CreateQuest("The Elder's Warning", "quest_elder_02",
+                QuestType.MainStory,
+                "Elder Mirren senses a deeper corruption behind the blight. Visit the village shrine to learn more.",
+                new[] {
+                    ("Talk to Elder Mirren", ObjectiveType.Talk, "elder_mirren", 1),
+                    ("Explore the village shrine", ObjectiveType.Explore, "village_shrine", 1)
+                },
+                new[] { ("verdance_shard", 2, 120, 60) });
+            elderQuest.PrerequisiteQuestIds = new[] { "quest_blight_01" };
+            _testQuests.Add(elderQuest);
+
+            var wardenQuest = CreateQuest("The Border Watch", "quest_warden_03",
+                QuestType.MainStory,
+                "Warden Sable reports strange creatures at the forest edge. Patrol the border and eliminate them.",
+                new[] {
+                    ("Kill border prowlers", ObjectiveType.Kill, "border_prowler", 6),
+                    ("Explore the forest edge", ObjectiveType.Explore, "forest_edge", 1)
+                },
+                new[] { ("iron_shield", 1, 150, 80) });
+            wardenQuest.PrerequisiteQuestIds = new[] { "quest_elder_02" };
+            _testQuests.Add(wardenQuest);
+
+            var healerQuest = CreateQuest("Maren's Remedy", "quest_healer_04",
+                QuestType.MainStory,
+                "Healer Maren needs blight samples to formulate an antidote before the corruption spreads further.",
+                new[] {
+                    ("Collect blight samples", ObjectiveType.Collect, "blight_sample", 8)
+                },
+                new[] { ("health_potion", 5, 130, 70) });
+            healerQuest.PrerequisiteQuestIds = new[] { "quest_elder_02" };
+            _testQuests.Add(healerQuest);
+
+            // Ashen Steppe
+            var steppeQuest = CreateQuest("Ashes and Omens", "quest_steppe_05",
+                QuestType.MainStory,
+                "Watcher Sera has seen dark omens in the scorched plains. Seek her counsel and purge the scorched husks.",
+                new[] {
+                    ("Talk to Watcher Sera", ObjectiveType.Talk, "watcher_sera", 1),
+                    ("Kill scorched husks", ObjectiveType.Kill, "scorched_husk", 8)
+                },
+                new[] { ("fire_crystal", 2, 250, 120) });
+            steppeQuest.PrerequisiteQuestIds = new[] { "quest_warden_03" };
+            _testQuests.Add(steppeQuest);
+
+            // Frosthollow Peaks
+            var peaksQuest = CreateQuest("Frozen Lore", "quest_peaks_06",
+                QuestType.MainStory,
+                "Scholar Veylin believes ancient scrolls hidden in the peaks hold the key to understanding the blight's origin.",
+                new[] {
+                    ("Collect ancient scrolls", ObjectiveType.Collect, "ancient_scroll", 4),
+                    ("Talk to Scholar Veylin", ObjectiveType.Talk, "scholar_veylin", 1)
+                },
+                new[] { ("frost_shard", 3, 350, 150) });
+            peaksQuest.PrerequisiteQuestIds = new[] { "quest_steppe_05" };
+            _testQuests.Add(peaksQuest);
+
+            var gateQuest = CreateQuest("The Mountain Gate", "quest_gate_07",
+                QuestType.MainStory,
+                "Sentinel Kaelos guards the mountain gate — but frost sentinels have overrun the pass. Clear the way.",
+                new[] {
+                    ("Kill frost sentinels", ObjectiveType.Kill, "frost_sentinel", 6),
+                    ("Talk to Sentinel Kaelos", ObjectiveType.Talk, "sentinel_kaelos", 1)
+                },
+                new[] { ("runic_core", 1, 400, 180) });
+            gateQuest.PrerequisiteQuestIds = new[] { "quest_peaks_06" };
+            _testQuests.Add(gateQuest);
+
+            // Gloomtide Marshes
+            var marshQuest = CreateQuest("Visions in the Mire", "quest_marsh_08",
+                QuestType.MainStory,
+                "Oracle Nyx receives visions of an approaching darkness. Explore the vision sites she has marked.",
+                new[] {
+                    ("Talk to Oracle Nyx", ObjectiveType.Talk, "oracle_nyx", 1),
+                    ("Explore vision sites", ObjectiveType.Explore, "vision_site", 3)
+                },
+                new[] { ("shadow_essence", 3, 450, 200) });
+            marshQuest.PrerequisiteQuestIds = new[] { "quest_gate_07" };
+            _testQuests.Add(marshQuest);
+
+            var gloomQuest = CreateQuest("Through the Gloom", "quest_gloom_09",
+                QuestType.MainStory,
+                "Ranger Theron knows a path through the deepest marshes, but marsh wraiths block the way.",
+                new[] {
+                    ("Kill marsh wraiths", ObjectiveType.Kill, "marsh_wraith", 8),
+                    ("Talk to Ranger Theron", ObjectiveType.Talk, "ranger_theron", 1)
+                },
+                new[] { ("moonstone_fragment", 2, 500, 220) });
+            gloomQuest.PrerequisiteQuestIds = new[] { "quest_marsh_08" };
+            _testQuests.Add(gloomQuest);
+
+            // Withered Heart
+            var echoQuest = CreateQuest("Echoes of the Past", "quest_echo_10",
+                QuestType.MainStory,
+                "A spectral echo of Elder Mirren lingers at the blight's nexus. Seek the truth before it fades.",
+                new[] {
+                    ("Talk to the Echo of Mirren", ObjectiveType.Talk, "echo_mirren", 1),
+                    ("Explore blight nexus points", ObjectiveType.Explore, "blight_nexus", 3)
+                },
+                new[] { ("ancient_seed", 3, 600, 280) });
+            echoQuest.PrerequisiteQuestIds = new[] { "quest_gloom_09" };
+            _testQuests.Add(echoQuest);
+
+            var finalQuest = CreateQuest("The Blightcaller", "quest_final_11",
+                QuestType.MainStory,
+                "The source of all corruption awaits at the heart of the Withered lands. End this — once and for all.",
+                new[] {
+                    ("Defeat the Blightcaller", ObjectiveType.Kill, "blightcaller", 1)
+                },
+                new[] { ("ancient_seed", 5, 1000, 500) });
+            finalQuest.PrerequisiteQuestIds = new[] { "quest_echo_10" };
+            _testQuests.Add(finalQuest);
+
+            // --- Companion Quests ---
+
+            var thorneQuest = CreateQuest("Thorne's Bounty", "quest_thorne_01",
+                QuestType.CompanionQuest,
+                "Thorne is tracking a bounty in the Frosthollow Peaks. Help him hunt frost reavers and question an informant.",
+                new[] {
+                    ("Kill frost reavers", ObjectiveType.Kill, "frost_reaver", 5),
+                    ("Talk to the informant", ObjectiveType.Talk, "thorne_informant", 1)
+                },
+                new[] { ("frost_shard", 2, 350, 160) });
+            thorneQuest.PrerequisiteQuestIds = new[] { "quest_peaks_06" };
+            _testQuests.Add(thorneQuest);
+
+            var seleneQuest = CreateQuest("Selene's Rite", "quest_selene_01",
+                QuestType.CompanionQuest,
+                "Selene must perform an ancient rite in the Gloomtide Marshes. Gather moonlight essence to aid her.",
+                new[] {
+                    ("Collect moonlight essence", ObjectiveType.Collect, "moonlight_essence", 5),
+                    ("Talk to Selene", ObjectiveType.Talk, "selene", 1)
+                },
+                new[] { ("moonstone_fragment", 3, 450, 200) });
+            seleneQuest.PrerequisiteQuestIds = new[] { "quest_marsh_08" };
+            _testQuests.Add(seleneQuest);
+
+            var eldaraQuest = CreateQuest("Eldara's Awakening", "quest_eldara_01",
+                QuestType.CompanionQuest,
+                "Eldara senses verdant seeds buried within the Withered Heart. Help her awaken them to reclaim the land.",
+                new[] {
+                    ("Explore verdant seed sites", ObjectiveType.Explore, "verdant_seed", 4),
+                    ("Talk to Eldara", ObjectiveType.Talk, "eldara", 1)
+                },
+                new[] { ("ancient_seed", 3, 700, 350) });
+            eldaraQuest.PrerequisiteQuestIds = new[] { "quest_final_11" };
+            _testQuests.Add(eldaraQuest);
+
             // Accept the first two quests
             _questManager.AcceptQuest(_testQuests[0]);
             _questManager.AcceptQuest(_testQuests[1]);
