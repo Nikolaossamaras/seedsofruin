@@ -568,13 +568,11 @@ namespace SoR.Testing
 
         private static Material CreateMaterial(Color color)
         {
-            // URP Lit needs keyword/property setup to avoid magenta.
-            // URP Unlit just works with _BaseColor — perfect for placeholder visuals.
-            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (shader == null) shader = Shader.Find("Unlit/Color");
-            if (shader == null) shader = Shader.Find("Standard");
-
-            var mat = new Material(shader);
+            // Clone the material Unity assigns to primitives — guaranteed to
+            // use the correct shader for whatever render pipeline is active.
+            var temp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var mat = new Material(temp.GetComponent<Renderer>().sharedMaterial);
+            Object.Destroy(temp);
 
             if (mat.HasProperty("_BaseColor"))
                 mat.SetColor("_BaseColor", color);
