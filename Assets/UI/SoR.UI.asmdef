@@ -1,0 +1,14 @@
+{
+    "name": "SoR.UI",
+    "rootNamespace": "SoR.UI",
+    "references": ["SoR.Core", "SoR.Shared", "SoR.Gameplay", "SoR.Systems", "SoR.Progression", "SoR.World", "SoR.Combat", "Unity.TextMeshPro"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

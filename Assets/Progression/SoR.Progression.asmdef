@@ -1,0 +1,14 @@
+{
+    "name": "SoR.Progression",
+    "rootNamespace": "SoR.Progression",
+    "references": ["SoR.Core", "SoR.Shared"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

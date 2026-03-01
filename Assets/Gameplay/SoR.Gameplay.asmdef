@@ -1,0 +1,14 @@
+{
+    "name": "SoR.Gameplay",
+    "rootNamespace": "SoR.Gameplay",
+    "references": ["SoR.Core", "SoR.Shared", "SoR.Combat", "SoR.AI", "Unity.InputSystem", "Unity.TextMeshPro"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

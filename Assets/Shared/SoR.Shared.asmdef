@@ -1,0 +1,14 @@
+{
+    "name": "SoR.Shared",
+    "rootNamespace": "SoR.Shared",
+    "references": ["SoR.Core"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

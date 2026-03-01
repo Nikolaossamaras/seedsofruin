@@ -1,0 +1,14 @@
+{
+    "name": "SoR.Editor",
+    "rootNamespace": "SoR.Editor",
+    "references": ["SoR.Core", "SoR.Shared", "SoR.Combat", "SoR.AI", "SoR.Gameplay", "SoR.Systems", "SoR.Progression", "SoR.World", "SoR.UI", "SoR.Input", "SoR.Audio", "SoR.VFX"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

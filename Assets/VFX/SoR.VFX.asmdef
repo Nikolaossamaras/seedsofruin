@@ -1,0 +1,14 @@
+{
+    "name": "SoR.VFX",
+    "rootNamespace": "SoR.VFX",
+    "references": ["SoR.Core", "SoR.Shared"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

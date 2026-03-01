@@ -1,0 +1,14 @@
+{
+    "name": "SoR.World",
+    "rootNamespace": "SoR.World",
+    "references": ["SoR.Core", "SoR.Shared", "SoR.Systems"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

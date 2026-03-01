@@ -1,0 +1,14 @@
+{
+    "name": "SoR.Systems",
+    "rootNamespace": "SoR.Systems",
+    "references": ["SoR.Core", "SoR.Shared", "SoR.Combat"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,14 @@
+{
+    "name": "SoR.AI",
+    "rootNamespace": "SoR.AI",
+    "references": ["SoR.Core", "SoR.Shared", "SoR.Combat"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
