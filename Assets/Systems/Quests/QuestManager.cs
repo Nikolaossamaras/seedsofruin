@@ -24,10 +24,12 @@ namespace SoR.Systems.Quests
     public readonly struct QuestCompletedEvent : IGameEvent
     {
         public readonly string QuestId;
+        public readonly string QuestName;
 
-        public QuestCompletedEvent(string questId)
+        public QuestCompletedEvent(string questId, string questName)
         {
             QuestId = questId;
+            QuestName = questName;
         }
     }
 
@@ -68,6 +70,7 @@ namespace SoR.Systems.Quests
     public class QuestManager : IService
     {
         private readonly Dictionary<string, QuestState> _activeQuests = new();
+        private readonly Dictionary<string, QuestState> _completedUncollected = new();
         private readonly HashSet<string> _completedQuestIds = new();
         private InventorySystem _inventory;
 
@@ -80,6 +83,7 @@ namespace SoR.Systems.Quests
         public void Dispose()
         {
             _activeQuests.Clear();
+            _completedUncollected.Clear();
             _completedQuestIds.Clear();
         }
 
@@ -99,7 +103,7 @@ namespace SoR.Systems.Quests
             {
                 foreach (string prereqId in quest.PrerequisiteQuestIds)
                 {
-                    if (!_completedQuestIds.Contains(prereqId))
+                    if (!IsQuestComplete(prereqId))
                     {
                         Debug.LogWarning($"[QuestManager] Prerequisite quest '{prereqId}' not completed.");
                         return;
@@ -153,7 +157,42 @@ namespace SoR.Systems.Quests
                 return;
             }
 
-            // Grant rewards
+            state.IsComplete = true;
+            _activeQuests.Remove(questId);
+            _completedUncollected[questId] = state;
+
+            EventBus.Raise(new QuestCompletedEvent(questId, state.Definition.QuestName));
+            Debug.Log($"[QuestManager] Completed quest: {state.Definition.QuestName} (awaiting collection)");
+        }
+
+        public bool CollectQuestRewards(string questId)
+        {
+            if (!_completedUncollected.TryGetValue(questId, out var state))
+                return false;
+
+            if (state.Definition.Type == QuestType.GuildContract)
+                return false;
+
+            GrantRewards(state);
+            FinalizeQuest(questId, state);
+            return true;
+        }
+
+        public bool CollectGuildQuestRewards(string questId)
+        {
+            if (!_completedUncollected.TryGetValue(questId, out var state))
+                return false;
+
+            if (state.Definition.Type != QuestType.GuildContract)
+                return false;
+
+            GrantRewards(state);
+            FinalizeQuest(questId, state);
+            return true;
+        }
+
+        private void GrantRewards(QuestState state)
+        {
             foreach (var reward in state.Definition.Rewards)
             {
                 if (!string.IsNullOrEmpty(reward.ItemId) && reward.Quantity > 0)
@@ -161,18 +200,18 @@ namespace SoR.Systems.Quests
                     _inventory.AddItem(reward.ItemId, reward.Quantity);
                 }
             }
+        }
 
-            state.IsComplete = true;
+        private void FinalizeQuest(string questId, QuestState state)
+        {
+            _completedUncollected.Remove(questId);
             _completedQuestIds.Add(questId);
-            _activeQuests.Remove(questId);
-
-            EventBus.Raise(new QuestCompletedEvent(questId));
-            Debug.Log($"[QuestManager] Completed quest: {state.Definition.QuestName}");
+            Debug.Log($"[QuestManager] Collected rewards for quest: {state.Definition.QuestName}");
         }
 
         public bool IsQuestComplete(string questId)
         {
-            if (_completedQuestIds.Contains(questId))
+            if (_completedQuestIds.Contains(questId) || _completedUncollected.ContainsKey(questId))
                 return true;
 
             if (!_activeQuests.TryGetValue(questId, out var state))
@@ -202,6 +241,11 @@ namespace SoR.Systems.Quests
             return new HashSet<string>(_completedQuestIds);
         }
 
+        public Dictionary<string, QuestState> GetCompletedUncollectedQuests()
+        {
+            return new Dictionary<string, QuestState>(_completedUncollected);
+        }
+
         private void CheckQuestCompletion(QuestState state)
         {
             for (int i = 0; i < state.Definition.Objectives.Count; i++)
@@ -210,7 +254,7 @@ namespace SoR.Systems.Quests
                     return;
             }
 
-            Debug.Log($"[QuestManager] All objectives met for quest: {state.Definition.QuestName}");
+            CompleteQuest(state.Definition.QuestId);
         }
     }
 }
