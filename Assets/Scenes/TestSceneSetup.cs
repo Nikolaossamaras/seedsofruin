@@ -100,6 +100,7 @@ namespace SoR.Testing
         private Text _blightLabel;
         private Text _blightZoneName;
         private float _currentBlight;
+        private float _displayedBlight;  // smoothly lerps toward _currentBlight
         private string _currentZoneName = "Wilderness";
 
         // ---- cached font ----
@@ -868,12 +869,16 @@ namespace SoR.Testing
 
             _currentBlight = GetBlightAtPosition(_player.transform.position);
 
+            // Smoothly animate the displayed blight toward the actual value
+            float lerpSpeed = 0.6f; // units per second — takes ~1.3s to go from 0 to 0.8
+            _displayedBlight = Mathf.MoveTowards(_displayedBlight, _currentBlight, lerpSpeed * Time.deltaTime);
+
             if (_blightFill != null)
             {
-                // Fill upward: anchorMax.y = blight level
+                // Fill upward: anchorMax.y = smoothed blight level
                 var fillRt = _blightFill.rectTransform;
                 var max = fillRt.anchorMax;
-                max.y = _currentBlight;
+                max.y = _displayedBlight;
                 fillRt.anchorMax = max;
                 fillRt.offsetMax = new Vector2(-2f, 0f);
 
@@ -881,11 +886,11 @@ namespace SoR.Testing
                 _blightFill.color = Color.Lerp(
                     new Color(0.4f, 0.15f, 0.5f, 0.9f),
                     new Color(0.9f, 0.1f, 0.15f, 0.95f),
-                    _currentBlight);
+                    _displayedBlight);
             }
 
             if (_blightLabel != null)
-                _blightLabel.text = $"{_currentBlight * 100f:F0}%";
+                _blightLabel.text = $"{_displayedBlight * 100f:F0}%";
 
             if (_blightZoneName != null)
                 _blightZoneName.text = _currentZoneName;
