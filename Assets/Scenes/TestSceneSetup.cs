@@ -145,6 +145,7 @@ namespace SoR.Testing
 
             SetupCombatSystem();
             CreateGround();
+            CreateRamps();
             CreatePlayer();
             CreateEnemies();
             CreateCompanionWeapon();
@@ -276,6 +277,85 @@ namespace SoR.Testing
                 new BiomeZone { Name = "Frosthollow Peaks",  Center = new Vector3(-55f, 0f, 55f),   HalfExtent = 30f, Height = 6f,   Blight = 0.15f, GroundColor = new Color(0.6f, 0.7f, 0.8f) },   // mountain peaks
                 new BiomeZone { Name = "The Withered Heart",  Center = new Vector3(55f, 0f, 55f),    HalfExtent = 30f, Height = 3.5f, Blight = 0.80f, GroundColor = new Color(0.3f, 0.15f, 0.2f) },  // raised corrupted mesa
             };
+        }
+
+        // ================================================================
+        // Ramps between biomes
+        // ================================================================
+
+        private void CreateRamps()
+        {
+            if (_biomes == null || _biomes.Length < 2) return;
+
+            // Connect each outer biome to Greenreach Valley (center biome)
+            var center = _biomes[0];
+            for (int i = 1; i < _biomes.Length; i++)
+                CreateBiomeRamp(center, _biomes[i]);
+        }
+
+        private void CreateBiomeRamp(BiomeZone a, BiomeZone b)
+        {
+            // Direction from a center to b center (XZ plane)
+            Vector2 aCenter = new Vector2(a.Center.x, a.Center.z);
+            Vector2 bCenter = new Vector2(b.Center.x, b.Center.z);
+            Vector2 dir = (bCenter - aCenter).normalized;
+
+            // Find where a ray from each center exits its square boundary
+            float tA = SquareExitDist(a.HalfExtent, dir);
+            float tB = SquareExitDist(b.HalfExtent, dir);
+
+            // Edge points: a's edge toward b, b's edge toward a
+            Vector2 aEdge = aCenter + dir * tA;
+            Vector2 bEdge = bCenter - dir * tB;
+
+            // Ramp spans from bEdge (inside a's territory) to aEdge (inside b's territory)
+            // Extend 3 units past each edge for overlap so there's no gap
+            Vector3 rampStart = new Vector3(bEdge.x - dir.x * 3f, a.Height, bEdge.y - dir.y * 3f);
+            Vector3 rampEnd   = new Vector3(aEdge.x + dir.x * 3f, b.Height, aEdge.y + dir.y * 3f);
+
+            Color rampColor = Color.Lerp(a.GroundColor, b.GroundColor, 0.5f) * 0.85f;
+            string rampName = $"Ramp_{a.Name.Replace(" ", "_")}_to_{b.Name.Replace(" ", "_")}";
+            CreateRamp(rampStart, rampEnd, 20f, rampColor, rampName);
+        }
+
+        private static float SquareExitDist(float halfExtent, Vector2 dir)
+        {
+            float t = float.MaxValue;
+            if (Mathf.Abs(dir.x) > 0.0001f) t = Mathf.Min(t, halfExtent / Mathf.Abs(dir.x));
+            if (Mathf.Abs(dir.y) > 0.0001f) t = Mathf.Min(t, halfExtent / Mathf.Abs(dir.y));
+            return t;
+        }
+
+        private void CreateRamp(Vector3 start, Vector3 end, float width, Color color, string name)
+        {
+            Vector3 delta = end - start;
+            Vector3 mid = (start + end) * 0.5f;
+            float slopeLength = delta.magnitude;
+
+            Vector3 horizontal = new Vector3(delta.x, 0f, delta.z);
+            float horizDist = horizontal.magnitude;
+            float heightDiff = delta.y;
+            float slopeAngle = Mathf.Atan2(heightDiff, horizDist) * Mathf.Rad2Deg;
+
+            // Offset center down by half-thickness so top surface aligns with ground
+            mid.y -= 0.15f;
+
+            var ramp = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            ramp.name = name;
+            ramp.transform.position = mid;
+
+            // Orient: face horizontal direction, then tilt for the slope
+            if (horizDist > 0.01f)
+            {
+                Quaternion yRot = Quaternion.LookRotation(horizontal.normalized, Vector3.up);
+                Quaternion tilt = Quaternion.Euler(-slopeAngle, 0f, 0f);
+                ramp.transform.rotation = yRot * tilt;
+            }
+
+            // Scale: X = width, Y = thin slab, Z = slope length
+            ramp.transform.localScale = new Vector3(width, 0.3f, slopeLength);
+
+            ramp.GetComponent<Renderer>().material = CreateMaterial(color);
         }
 
         /// <summary>Returns the blight level (0..1) for the biome the given position is in.</summary>
