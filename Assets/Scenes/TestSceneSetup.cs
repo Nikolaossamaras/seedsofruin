@@ -34,8 +34,22 @@ namespace SoR.Testing
         private float _playerVerdance;
         private float _playerMaxVerdance;
 
+        // Public accessors for cheat menu
+        public float PlayerHealth { get => _playerHealth; set => _playerHealth = Mathf.Clamp(value, 0f, _playerMaxHealth); }
+        public float PlayerMaxHealth { get => _playerMaxHealth; set { _playerMaxHealth = value; _playerHealth = Mathf.Min(_playerHealth, value); } }
+        public float PlayerVerdance { get => _playerVerdance; set => _playerVerdance = Mathf.Clamp(value, 0f, _playerMaxVerdance); }
+        public float PlayerMaxVerdance { get => _playerMaxVerdance; set { _playerMaxVerdance = value; _playerVerdance = Mathf.Min(_playerVerdance, value); } }
+        public PlayerStatsSO PlayerStats => _playerStats;
+        public WeaponDefinitionSO TestWeapon => _testWeapon;
+        public bool GodMode { get; set; }
+        public bool OneHitKill { get; set; }
+
         // ---- enemies ----
         private readonly List<EnemyEntry> _enemies = new();
+
+        // ---- companions ----
+        private readonly List<CompanionEntry> _companions = new();
+        private WeaponDefinitionSO _companionWeapon;
 
         // ---- attack hit detection ----
         private readonly HashSet<int> _hitThisSwing = new();
@@ -54,6 +68,14 @@ namespace SoR.Testing
             public Transform HealthBarCanvas;
         }
 
+        private struct CompanionEntry
+        {
+            public string CompanionId;
+            public string Slot;
+            public GameObject Root;
+            public TestCompanionBehavior Behavior;
+        }
+
         // ================================================================
         // Lifecycle
         // ================================================================
@@ -68,15 +90,27 @@ namespace SoR.Testing
             CreateGround();
             CreatePlayer();
             CreateEnemies();
+            CreateCompanionWeapon();
             SetupCamera();
             CreateHUD();
             SubscribeEvents();
+
+            // Attach menu UI system (all screens openable via keyboard)
+            gameObject.AddComponent<TestMenuUI>();
         }
 
         private void OnDestroy()
         {
             EventBus.Unsubscribe<DamageDealtEvent>(OnDamageDealt);
             EventBus.Unsubscribe<EnemyKilledEvent>(OnEnemyKilled);
+
+            // Cleanup companion GOs
+            foreach (var entry in _companions)
+            {
+                if (entry.Root != null)
+                    Destroy(entry.Root);
+            }
+            _companions.Clear();
         }
 
         private void Update()
@@ -85,6 +119,25 @@ namespace SoR.Testing
             UpdateHUD();
             UpdateEnemyHealthBars();
             CheckPlayerAttackHits();
+        }
+
+        // ================================================================
+        // Asset loading helpers
+        // ================================================================
+
+        private static T TryLoadAsset<T>(string path) where T : Object
+        {
+            return Resources.Load<T>(path);
+        }
+
+        /// <summary>
+        /// Strips all colliders from a GameObject hierarchy so loaded prefabs
+        /// don't conflict with the CharacterController / BoxCollider added at runtime.
+        /// </summary>
+        private static void StripColliders(GameObject go)
+        {
+            foreach (var col in go.GetComponentsInChildren<Collider>())
+                Object.Destroy(col);
         }
 
         // ================================================================
@@ -99,11 +152,27 @@ namespace SoR.Testing
 
         private void CreateGround()
         {
-            var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            ground.name = "Ground";
-            ground.transform.position = Vector3.zero;
-            ground.transform.localScale = new Vector3(5f, 1f, 5f); // 50x50
-            ground.GetComponent<Renderer>().material = CreateMaterial(new Color(0.35f, 0.55f, 0.3f));
+            // Try custom prefab first
+            var groundPrefab = TryLoadAsset<GameObject>("TestAssets/Ground/GroundPrefab");
+            if (groundPrefab != null)
+            {
+                var ground = Instantiate(groundPrefab);
+                ground.name = "Ground";
+                ground.transform.position = Vector3.zero;
+                return;
+            }
+
+            // Fallback: primitive plane
+            var plane = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            plane.name = "Ground";
+            plane.transform.position = Vector3.zero;
+            plane.transform.localScale = new Vector3(5f, 1f, 5f); // 50x50
+
+            // Try custom material, else default green
+            var groundMat = TryLoadAsset<Material>("TestAssets/Ground/GroundMaterial");
+            plane.GetComponent<Renderer>().material = groundMat != null
+                ? groundMat
+                : CreateMaterial(new Color(0.35f, 0.55f, 0.3f));
         }
 
         private void CreatePlayer()
@@ -112,13 +181,44 @@ namespace SoR.Testing
             _player = new GameObject("Player");
             _player.transform.position = Vector3.zero;
 
-            // Capsule visual
-            var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            capsule.name = "PlayerModel";
-            capsule.transform.SetParent(_player.transform, false);
-            capsule.transform.localPosition = new Vector3(0f, 1f, 0f);
-            capsule.GetComponent<Renderer>().material = CreateMaterial(new Color(0.2f, 0.4f, 0.9f));
-            Object.Destroy(capsule.GetComponent<CapsuleCollider>());
+            // Visual — try custom prefab, fall back to capsule
+            GameObject playerVisual;
+            var playerPrefab = TryLoadAsset<GameObject>("TestAssets/Player/PlayerModel");
+            if (playerPrefab != null)
+            {
+                playerVisual = Instantiate(playerPrefab, _player.transform, false);
+                playerVisual.name = "PlayerModel";
+                playerVisual.transform.localPosition = new Vector3(0f, 1f, 0f);
+                StripColliders(playerVisual);
+            }
+            else
+            {
+                playerVisual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                playerVisual.name = "PlayerModel";
+                playerVisual.transform.SetParent(_player.transform, false);
+                playerVisual.transform.localPosition = new Vector3(0f, 1f, 0f);
+                Object.Destroy(playerVisual.GetComponent<CapsuleCollider>());
+            }
+
+            // Material — try custom, else default blue
+            var playerMat = TryLoadAsset<Material>("TestAssets/Player/PlayerMaterial");
+            var renderer = playerVisual.GetComponentInChildren<Renderer>();
+            if (renderer != null)
+            {
+                renderer.material = playerMat != null
+                    ? playerMat
+                    : CreateMaterial(new Color(0.2f, 0.4f, 0.9f));
+            }
+
+            // Weapon model — try loading and parent to WeaponMount or model root
+            var weaponPrefab = TryLoadAsset<GameObject>("TestAssets/Weapons/WeaponModel");
+            if (weaponPrefab != null)
+            {
+                var mountPoint = playerVisual.transform.Find("WeaponMount") ?? playerVisual.transform;
+                var weapon = Instantiate(weaponPrefab, mountPoint, false);
+                weapon.name = "WeaponModel";
+                StripColliders(weapon);
+            }
 
             // CharacterController
             var cc = _player.AddComponent<CharacterController>();
@@ -130,8 +230,12 @@ namespace SoR.Testing
             var movement = _player.AddComponent<PlayerMovement>();
             movement.SetCharacterController(cc);
 
-            // PlayerView (animator stays null — all methods already null-check it)
+            // PlayerView (animator stays null — ProceduralAnimator handles visuals)
             var view = _player.AddComponent<PlayerView>();
+
+            // Procedural animator
+            var procAnim = playerVisual.AddComponent<ProceduralAnimator>();
+            view.SetProceduralAnimator(procAnim);
 
             // PlayerStatsSO
             _playerStats = ScriptableObject.CreateInstance<PlayerStatsSO>();
@@ -186,7 +290,7 @@ namespace SoR.Testing
                 new Vector3(0f, 0f, -7f)
             };
 
-            string[] names = { "Enemy_A", "Enemy_B", "Enemy_C" };
+            string[] names = { "Blighted_Wolf", "Blighted_Wolf", "Blighted_Wolf" };
 
             for (int i = 0; i < 3; i++)
                 _enemies.Add(CreateEnemy(names[i], positions[i]));
@@ -198,14 +302,35 @@ namespace SoR.Testing
             var go = new GameObject(enemyName);
             go.transform.position = position;
 
-            // Cube visual
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = "EnemyModel";
-            cube.transform.SetParent(go.transform, false);
-            cube.transform.localPosition = new Vector3(0f, 0.75f, 0f);
-            cube.transform.localScale = new Vector3(1f, 1.5f, 1f);
-            cube.GetComponent<Renderer>().material = CreateMaterial(new Color(0.9f, 0.2f, 0.2f));
-            Object.Destroy(cube.GetComponent<BoxCollider>());
+            // Visual — try custom prefab, fall back to cube
+            var enemyPrefab = TryLoadAsset<GameObject>("TestAssets/Enemies/EnemyModel");
+            GameObject enemyVisual;
+            if (enemyPrefab != null)
+            {
+                enemyVisual = Instantiate(enemyPrefab, go.transform, false);
+                enemyVisual.name = "EnemyModel";
+                enemyVisual.transform.localPosition = new Vector3(0f, 0.75f, 0f);
+                StripColliders(enemyVisual);
+            }
+            else
+            {
+                enemyVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                enemyVisual.name = "EnemyModel";
+                enemyVisual.transform.SetParent(go.transform, false);
+                enemyVisual.transform.localPosition = new Vector3(0f, 0.75f, 0f);
+                enemyVisual.transform.localScale = new Vector3(1f, 1.5f, 1f);
+                Object.Destroy(enemyVisual.GetComponent<BoxCollider>());
+            }
+
+            // Material — try custom, else default red
+            var enemyMat = TryLoadAsset<Material>("TestAssets/Enemies/EnemyMaterial");
+            var enemyRenderer = enemyVisual.GetComponentInChildren<Renderer>();
+            if (enemyRenderer != null)
+            {
+                enemyRenderer.material = enemyMat != null
+                    ? enemyMat
+                    : CreateMaterial(new Color(0.9f, 0.2f, 0.2f));
+            }
 
             // Collider on root for hit detection
             var col = go.AddComponent<BoxCollider>();
@@ -276,12 +401,9 @@ namespace SoR.Testing
             fillGo.transform.SetParent(canvasGo.transform, false);
             var fillImg = fillGo.AddComponent<Image>();
             fillImg.color = new Color(0.9f, 0.15f, 0.15f, 1f);
-            fillImg.type = Image.Type.Filled;
-            fillImg.fillMethod = Image.FillMethod.Horizontal;
-            fillImg.fillAmount = 1f;
             var fillRt = fillGo.GetComponent<RectTransform>();
             fillRt.anchorMin = Vector2.zero;
-            fillRt.anchorMax = Vector2.one;
+            fillRt.anchorMax = Vector2.one; // anchorMax.x driven in UpdateEnemyHealthBars
             fillRt.offsetMin = new Vector2(2f, 2f);
             fillRt.offsetMax = new Vector2(-2f, -2f);
 
@@ -346,17 +468,14 @@ namespace SoR.Testing
             bgRt.offsetMin = Vector2.zero;
             bgRt.offsetMax = Vector2.zero;
 
-            // Fill
+            // Fill — use anchor-driven width (no sprite needed)
             var fill = new GameObject("Fill");
             fill.transform.SetParent(container.transform, false);
             var fillImg = fill.AddComponent<Image>();
             fillImg.color = fillColor;
-            fillImg.type = Image.Type.Filled;
-            fillImg.fillMethod = Image.FillMethod.Horizontal;
-            fillImg.fillAmount = 1f;
             var fillRt = fill.GetComponent<RectTransform>();
             fillRt.anchorMin = Vector2.zero;
-            fillRt.anchorMax = Vector2.one;
+            fillRt.anchorMax = Vector2.one; // anchorMax.x will be driven in UpdateHUD
             fillRt.offsetMin = new Vector2(2f, 2f);
             fillRt.offsetMax = new Vector2(-2f, -2f);
 
@@ -402,8 +521,8 @@ namespace SoR.Testing
         {
             if (_playerController == null) return;
 
-            // Skip if player is invincible (dodging)
-            if (_playerController.IsInvincible) return;
+            // Skip if player is invincible (dodging) or god mode
+            if (_playerController.IsInvincible || GodMode) return;
 
             _playerHealth = Mathf.Max(0f, _playerHealth - damage);
 
@@ -425,9 +544,25 @@ namespace SoR.Testing
         private void UpdateHUD()
         {
             if (_healthFill != null)
-                _healthFill.fillAmount = _playerMaxHealth > 0f ? _playerHealth / _playerMaxHealth : 0f;
+            {
+                float pct = _playerMaxHealth > 0f ? _playerHealth / _playerMaxHealth : 0f;
+                SetBarFill(_healthFill.rectTransform, pct);
+            }
             if (_verdanceFill != null)
-                _verdanceFill.fillAmount = _playerMaxVerdance > 0f ? _playerVerdance / _playerMaxVerdance : 0f;
+            {
+                float pct = _playerMaxVerdance > 0f ? _playerVerdance / _playerMaxVerdance : 0f;
+                SetBarFill(_verdanceFill.rectTransform, pct);
+            }
+        }
+
+        private static void SetBarFill(RectTransform fillRt, float fraction)
+        {
+            fraction = Mathf.Clamp01(fraction);
+            var max = fillRt.anchorMax;
+            max.x = fraction;
+            fillRt.anchorMax = max;
+            // Keep right offset at 0 so the bar edge aligns with the anchor
+            fillRt.offsetMax = new Vector2(0f, fillRt.offsetMax.y);
         }
 
         private void UpdateEnemyHealthBars()
@@ -439,7 +574,7 @@ namespace SoR.Testing
                 if (entry.AI == null || entry.HealthFill == null) continue;
 
                 float fill = entry.AI.MaxHealth > 0f ? entry.AI.CurrentHealth / entry.AI.MaxHealth : 0f;
-                entry.HealthFill.fillAmount = Mathf.Max(0f, fill);
+                SetBarFill(entry.HealthFill.rectTransform, Mathf.Max(0f, fill));
 
                 // Billboard — face same direction as camera
                 if (entry.HealthBarCanvas != null)
@@ -481,13 +616,14 @@ namespace SoR.Testing
                 if (_hitThisSwing.Contains(id)) continue;
                 _hitThisSwing.Add(id);
 
+                float damageMultiplier = OneHitKill ? 9999f : 1f;
                 combat.ProcessAttack(
                     _player,
                     ai.gameObject,
                     _testWeapon,
                     _playerStats.BaseStats,
                     ai.Definition != null ? ai.Definition.BaseStats : default,
-                    1f,
+                    damageMultiplier,
                     false);
             }
         }
@@ -561,6 +697,217 @@ namespace SoR.Testing
 
             Destroy(go);
         }
+
+        // ================================================================
+        // Companions
+        // ================================================================
+
+        private static readonly string[] CompanionIds =
+        {
+            "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
+            "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
+            "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
+        };
+
+        private static readonly Element[] CompanionElements =
+        {
+            Element.None, Element.Verdant, Element.Volt, Element.Hydro,
+            Element.Geo, Element.Pyro, Element.Verdant, Element.Hydro,
+            Element.Verdant, Element.Umbral, Element.Cryo, Element.Pyro
+        };
+
+        private static readonly Rarity[] CompanionRarities =
+        {
+            Rarity.Common, Rarity.Common, Rarity.Common, Rarity.Common,
+            Rarity.Rare, Rarity.Rare, Rarity.Rare, Rarity.Rare,
+            Rarity.Legendary, Rarity.Legendary, Rarity.Legendary, Rarity.Mythic
+        };
+
+        private void CreateCompanionWeapon()
+        {
+            _companionWeapon = ScriptableObject.CreateInstance<WeaponDefinitionSO>();
+            _companionWeapon.WeaponName = "Companion Strike";
+            _companionWeapon.BaseDamage = 25f;
+            _companionWeapon.BaseStagger = 5f;
+            _companionWeapon.AttackSpeed = 1f;
+            _companionWeapon.ChargedMultiplier = 1f;
+            _companionWeapon.DamageType = DamageType.Physical;
+            _companionWeapon.Element = Element.None;
+            _companionWeapon.MaxComboHits = 1;
+        }
+
+        /// <summary>
+        /// Called by TestMenuUI when the player assigns or removes a companion from a party slot.
+        /// </summary>
+        public void SetPartyCompanion(string slot, string companionId)
+        {
+            DespawnCompanion(slot);
+
+            if (!string.IsNullOrEmpty(companionId))
+                SpawnCompanion(slot, companionId);
+        }
+
+        private void SpawnCompanion(string slot, string companionId)
+        {
+            // Offset: Active = left-behind, Support = right-behind
+            Vector3 followOffset = slot == "Active"
+                ? new Vector3(-1.5f, 0f, -1.5f)
+                : new Vector3(1.5f, 0f, -1.5f);
+
+            Vector3 spawnPos = _player.transform.position
+                + _player.transform.TransformDirection(followOffset);
+
+            // Root
+            var root = new GameObject($"Companion_{companionId}_{slot}");
+            root.transform.position = spawnPos;
+
+            // Visual — try per-companion prefab, then generic fallback, then capsule
+            GameObject visual;
+            var companionPrefab = TryLoadAsset<GameObject>($"TestAssets/Companions/{companionId}/CompanionModel");
+            if (companionPrefab == null)
+                companionPrefab = TryLoadAsset<GameObject>("TestAssets/Companions/CompanionModel");
+
+            if (companionPrefab != null)
+            {
+                visual = Instantiate(companionPrefab, root.transform, false);
+                visual.name = "CompanionModel";
+                visual.transform.localPosition = new Vector3(0f, 0.8f, 0f);
+                StripColliders(visual);
+            }
+            else
+            {
+                visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+                visual.name = "CompanionModel";
+                visual.transform.SetParent(root.transform, false);
+                visual.transform.localPosition = new Vector3(0f, 0.8f, 0f);
+                visual.transform.localScale = new Vector3(0.7f, 0.7f, 0.7f);
+                Object.Destroy(visual.GetComponent<CapsuleCollider>());
+            }
+
+            // Material — try per-companion, then generic, then element color fallback
+            var companionMat = TryLoadAsset<Material>($"TestAssets/Companions/{companionId}/CompanionMaterial");
+            if (companionMat == null)
+                companionMat = TryLoadAsset<Material>("TestAssets/Companions/CompanionMaterial");
+
+            var renderer = visual.GetComponentInChildren<Renderer>();
+            if (renderer != null)
+            {
+                renderer.material = companionMat != null
+                    ? companionMat
+                    : CreateMaterial(GetCompanionElementColor(companionId));
+            }
+
+            // Procedural animator on visual child
+            var animator = visual.AddComponent<CompanionProceduralAnimator>();
+
+            // Build enemy AI list for the behavior to scan
+            var enemyAIs = new List<EnemyAIController>();
+            foreach (var entry in _enemies)
+            {
+                if (entry.AI != null)
+                    enemyAIs.Add(entry.AI);
+            }
+
+            // Behavior on root
+            var behavior = root.AddComponent<TestCompanionBehavior>();
+            behavior.FollowOffset = followOffset;
+            behavior.Initialize(_player.transform, enemyAIs, animator);
+
+            // Wire attack callback
+            string capturedId = companionId;
+            behavior.OnAttackEnemy += (enemyAI) => OnCompanionAttackEnemy(root, capturedId, enemyAI);
+
+            _companions.Add(new CompanionEntry
+            {
+                CompanionId = companionId,
+                Slot = slot,
+                Root = root,
+                Behavior = behavior
+            });
+        }
+
+        private void DespawnCompanion(string slot)
+        {
+            for (int i = _companions.Count - 1; i >= 0; i--)
+            {
+                if (_companions[i].Slot == slot)
+                {
+                    if (_companions[i].Root != null)
+                        Destroy(_companions[i].Root);
+                    _companions.RemoveAt(i);
+                }
+            }
+        }
+
+        private void OnCompanionAttackEnemy(GameObject companionGo, string companionId, EnemyAIController enemyAI)
+        {
+            if (enemyAI == null || !enemyAI.IsAlive) return;
+
+            var combat = ServiceLocator.TryResolve<CombatSystem>(out var cs) ? cs : null;
+            if (combat == null) return;
+
+            // Set weapon element per companion
+            Element companionElement = GetCompanionElement(companionId);
+            _companionWeapon.Element = companionElement;
+
+            StatBlock attackerStats = GetCompanionStatBlock(companionId);
+            StatBlock defenderStats = enemyAI.Definition != null ? enemyAI.Definition.BaseStats : default;
+
+            combat.ProcessAttack(
+                companionGo,
+                enemyAI.gameObject,
+                _companionWeapon,
+                attackerStats,
+                defenderStats,
+                1f,
+                false);
+        }
+
+        private static Element GetCompanionElement(string companionId)
+        {
+            int idx = System.Array.IndexOf(CompanionIds, companionId);
+            return idx >= 0 ? CompanionElements[idx] : Element.None;
+        }
+
+        private static Color GetCompanionElementColor(string companionId)
+        {
+            return ElementToColor(GetCompanionElement(companionId));
+        }
+
+        private static StatBlock GetCompanionStatBlock(string companionId)
+        {
+            int idx = System.Array.IndexOf(CompanionIds, companionId);
+            Rarity rarity = idx >= 0 ? CompanionRarities[idx] : Rarity.Common;
+
+            float multiplier = rarity switch
+            {
+                Rarity.Common => 1f,
+                Rarity.Rare => 1.5f,
+                _ => 2f // Legendary, Mythic
+            };
+
+            return new StatBlock
+            {
+                Vigor = 8f * multiplier,
+                Strength = 12f * multiplier,
+                Harvest = 5f * multiplier,
+                Verdance = 8f * multiplier,
+                Agility = 8f * multiplier,
+                Resilience = 4f * multiplier
+            };
+        }
+
+        private static Color ElementToColor(Element e) => e switch
+        {
+            Element.Verdant => new Color(0.3f, 0.9f, 0.4f),
+            Element.Pyro => new Color(1f, 0.4f, 0.2f),
+            Element.Hydro => new Color(0.3f, 0.6f, 1f),
+            Element.Volt => new Color(1f, 1f, 0.3f),
+            Element.Umbral => new Color(0.6f, 0.3f, 0.8f),
+            Element.Cryo => new Color(0.6f, 0.9f, 1f),
+            Element.Geo => new Color(0.8f, 0.65f, 0.3f),
+            _ => Color.white
+        };
 
         // ================================================================
         // Helpers

@@ -859,7 +859,11 @@ namespace SoR.Testing
             Color activeColor = _partyActiveId != null ? Color.white : new Color(0.4f, 0.4f, 0.4f);
             AddRowLabel(headerContent, activeLine, 0, activeColor);
             if (_partyActiveId != null)
-                AddButton(headerContent, "Remove", 0, () => { _partyActiveId = null; CloseActiveScreen(); ShowCompanions(); });
+                AddButton(headerContent, "Remove", 0, () => {
+                    _partyActiveId = null;
+                    if (_sceneSetup != null) _sceneSetup.SetPartyCompanion("Active", null);
+                    CloseActiveScreen(); ShowCompanions();
+                });
 
             // Support slot
             string supportLine = _partySupportId != null
@@ -868,10 +872,22 @@ namespace SoR.Testing
             Color supportColor = _partySupportId != null ? Color.white : new Color(0.4f, 0.4f, 0.4f);
             AddRowLabel(headerContent, supportLine, 1, supportColor);
             if (_partySupportId != null)
-                AddButton(headerContent, "Remove", 1, () => { _partySupportId = null; CloseActiveScreen(); ShowCompanions(); });
+                AddButton(headerContent, "Remove", 1, () => {
+                    _partySupportId = null;
+                    if (_sceneSetup != null) _sceneSetup.SetPartyCompanion("Support", null);
+                    CloseActiveScreen(); ShowCompanions();
+                });
 
             // Clear Party button
-            AddButton(headerContent, "Clear Party", 2, () => { _partyActiveId = null; _partySupportId = null; CloseActiveScreen(); ShowCompanions(); });
+            AddButton(headerContent, "Clear Party", 2, () => {
+                _partyActiveId = null; _partySupportId = null;
+                if (_sceneSetup != null)
+                {
+                    _sceneSetup.SetPartyCompanion("Active", null);
+                    _sceneSetup.SetPartyCompanion("Support", null);
+                }
+                CloseActiveScreen(); ShowCompanions();
+            });
 
             SetContentHeight(headerContent, 3);
 
@@ -911,12 +927,22 @@ namespace SoR.Testing
                         {
                             if (_partySupportId == capturedId) _partySupportId = null;
                             _partyActiveId = capturedId;
+                            if (_sceneSetup != null)
+                            {
+                                _sceneSetup.SetPartyCompanion("Support", _partySupportId);
+                                _sceneSetup.SetPartyCompanion("Active", _partyActiveId);
+                            }
                             CloseActiveScreen(); ShowCompanions();
                         },
                         "Support", () =>
                         {
                             if (_partyActiveId == capturedId) _partyActiveId = null;
                             _partySupportId = capturedId;
+                            if (_sceneSetup != null)
+                            {
+                                _sceneSetup.SetPartyCompanion("Active", _partyActiveId);
+                                _sceneSetup.SetPartyCompanion("Support", _partySupportId);
+                            }
                             CloseActiveScreen(); ShowCompanions();
                         });
                 }
