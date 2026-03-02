@@ -80,6 +80,9 @@ namespace SoR.Testing
         private readonly HashSet<int> _hitThisSwing = new();
         private bool _wasAttacking;
 
+        // ---- gravity ----
+        private float _verticalVelocity;
+
         // ---- camera ----
         private readonly Vector3 _cameraOffset = new Vector3(0f, 18f, -12f);
 
@@ -89,6 +92,7 @@ namespace SoR.Testing
             public string Name;
             public Vector3 Center;
             public float HalfExtent; // square zone: center ± halfExtent on X and Z
+            public float Height;     // ground Y elevation
             public float Blight;     // 0..1
             public Color GroundColor;
         }
@@ -168,10 +172,25 @@ namespace SoR.Testing
 
         private void Update()
         {
+            ApplyGravity();
             UpdateCamera();
             UpdateHUD();
             UpdateEnemyHealthBars();
             CheckPlayerAttackHits();
+        }
+
+        private void ApplyGravity()
+        {
+            if (_player == null) return;
+            var cc = _player.GetComponent<CharacterController>();
+            if (cc == null) return;
+
+            if (cc.isGrounded && _verticalVelocity < 0f)
+                _verticalVelocity = -0.5f; // small downward to stay grounded
+            else
+                _verticalVelocity -= 20f * Time.deltaTime; // gravity
+
+            cc.Move(new Vector3(0f, _verticalVelocity * Time.deltaTime, 0f));
         }
 
         // ================================================================
@@ -225,12 +244,12 @@ namespace SoR.Testing
             basePlane.transform.localScale = new Vector3(20f, 1f, 20f); // 200x200
             basePlane.GetComponent<Renderer>().material = CreateMaterial(new Color(0.25f, 0.2f, 0.15f)); // dark earth base
 
-            // Create colored biome overlay planes (slightly above base to avoid z-fighting)
+            // Create colored biome planes at their respective heights
             foreach (var biome in _biomes)
             {
                 var biomePlane = GameObject.CreatePrimitive(PrimitiveType.Plane);
                 biomePlane.name = $"Biome_{biome.Name.Replace(" ", "_")}";
-                biomePlane.transform.position = biome.Center + Vector3.up * 0.02f;
+                biomePlane.transform.position = new Vector3(biome.Center.x, biome.Height, biome.Center.z);
                 // Each biome zone is 2*halfExtent wide; plane default is 10 units, so scale = halfExtent*2/10
                 float planeScale = biome.HalfExtent * 2f / 10f;
                 biomePlane.transform.localScale = new Vector3(planeScale, 1f, planeScale);
@@ -251,11 +270,11 @@ namespace SoR.Testing
             //   Withered Heart     — north (far, dangerous)
             _biomes = new[]
             {
-                new BiomeZone { Name = "Greenreach Valley",  Center = new Vector3(0f, 0f, 0f),     HalfExtent = 35f, Blight = 0.05f, GroundColor = new Color(0.35f, 0.55f, 0.3f) },  // lush green
-                new BiomeZone { Name = "The Ashen Steppe",   Center = new Vector3(-55f, 0f, -55f),  HalfExtent = 30f, Blight = 0.25f, GroundColor = new Color(0.55f, 0.35f, 0.2f) },  // scorched brown
-                new BiomeZone { Name = "Gloomtide Marshes",  Center = new Vector3(55f, 0f, -55f),   HalfExtent = 30f, Blight = 0.40f, GroundColor = new Color(0.2f, 0.35f, 0.25f) },  // dark swamp green
-                new BiomeZone { Name = "Frosthollow Peaks",  Center = new Vector3(-55f, 0f, 55f),   HalfExtent = 30f, Blight = 0.15f, GroundColor = new Color(0.6f, 0.7f, 0.8f) },    // icy blue-gray
-                new BiomeZone { Name = "The Withered Heart",  Center = new Vector3(55f, 0f, 55f),    HalfExtent = 30f, Blight = 0.80f, GroundColor = new Color(0.3f, 0.15f, 0.2f) },   // corrupted dark
+                new BiomeZone { Name = "Greenreach Valley",  Center = new Vector3(0f, 0f, 0f),     HalfExtent = 35f, Height = 0f,   Blight = 0.05f, GroundColor = new Color(0.35f, 0.55f, 0.3f) },  // valley floor
+                new BiomeZone { Name = "The Ashen Steppe",   Center = new Vector3(-55f, 0f, -55f),  HalfExtent = 30f, Height = 2f,   Blight = 0.25f, GroundColor = new Color(0.55f, 0.35f, 0.2f) },  // raised arid plateau
+                new BiomeZone { Name = "Gloomtide Marshes",  Center = new Vector3(55f, 0f, -55f),   HalfExtent = 30f, Height = -1.5f, Blight = 0.40f, GroundColor = new Color(0.2f, 0.35f, 0.25f) }, // sunken swamp
+                new BiomeZone { Name = "Frosthollow Peaks",  Center = new Vector3(-55f, 0f, 55f),   HalfExtent = 30f, Height = 6f,   Blight = 0.15f, GroundColor = new Color(0.6f, 0.7f, 0.8f) },   // mountain peaks
+                new BiomeZone { Name = "The Withered Heart",  Center = new Vector3(55f, 0f, 55f),    HalfExtent = 30f, Height = 3.5f, Blight = 0.80f, GroundColor = new Color(0.3f, 0.15f, 0.2f) },  // raised corrupted mesa
             };
         }
 
@@ -385,8 +404,9 @@ namespace SoR.Testing
         private void CreateEnemies()
         {
             // GDD-accurate enemy roster — each enemy in its proper biome zone on the 200x200 map
+            // Heights: Greenreach=0, Ashen=2, Gloomtide=-1.5, Frosthollow=6, Withered=3.5
 
-            // Greenreach Valley (center: 0,0 — radius ~35)
+            // Greenreach Valley (center: 0,0 — height 0)
             SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(12f, 0f, 8f));
             SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(-10f, 0f, 14f));
             SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(20f, 0f, -5f));
@@ -394,29 +414,29 @@ namespace SoR.Testing
             SpawnEnemy("Corrupted Farmhand",  5,  Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(5f, 0f, 22f));
             SpawnEnemy("Wither Stag",         8,  Element.Verdant, Rarity.Rare,   "Withered Beast",   new Vector3(-8f, 0f, 28f));
 
-            // The Ashen Steppe (center: -55, -55 — radius ~30)
-            SpawnEnemy("Dustcrawler",         11, Element.Pyro,    Rarity.Common, "Withered Beast",   new Vector3(-45f, 0f, -45f));
-            SpawnEnemy("Scorched Viper",      13, Element.Pyro,    Rarity.Common, "The Untamed",      new Vector3(-60f, 0f, -50f));
-            SpawnEnemy("Acolyte Ranger",      15, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-50f, 0f, -65f));
-            SpawnEnemy("Ashwalker Golem",     17, Element.Pyro,    Rarity.Rare,   "Constructs",       new Vector3(-65f, 0f, -70f));
+            // The Ashen Steppe (center: -55, -55 — height 2)
+            SpawnEnemy("Dustcrawler",         11, Element.Pyro,    Rarity.Common, "Withered Beast",   new Vector3(-45f, 2f, -45f));
+            SpawnEnemy("Scorched Viper",      13, Element.Pyro,    Rarity.Common, "The Untamed",      new Vector3(-60f, 2f, -50f));
+            SpawnEnemy("Acolyte Ranger",      15, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-50f, 2f, -65f));
+            SpawnEnemy("Ashwalker Golem",     17, Element.Pyro,    Rarity.Rare,   "Constructs",       new Vector3(-65f, 2f, -70f));
 
-            // Gloomtide Marshes (center: 55, -55 — radius ~30)
-            SpawnEnemy("Bogfiend",            17, Element.Umbral,  Rarity.Common, "Blight Spawn",     new Vector3(45f, 0f, -45f));
-            SpawnEnemy("Sporecap Horror",     19, Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(60f, 0f, -50f));
-            SpawnEnemy("Drowned Sentinel",    21, Element.Umbral,  Rarity.Common, "Corrupted Human",  new Vector3(50f, 0f, -65f));
-            SpawnEnemy("The Mire Queen",      23, Element.Umbral,  Rarity.Rare,   "Blight Spawn",     new Vector3(65f, 0f, -70f));
+            // Gloomtide Marshes (center: 55, -55 — height -1.5)
+            SpawnEnemy("Bogfiend",            17, Element.Umbral,  Rarity.Common, "Blight Spawn",     new Vector3(45f, -1.5f, -45f));
+            SpawnEnemy("Sporecap Horror",     19, Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(60f, -1.5f, -50f));
+            SpawnEnemy("Drowned Sentinel",    21, Element.Umbral,  Rarity.Common, "Corrupted Human",  new Vector3(50f, -1.5f, -65f));
+            SpawnEnemy("The Mire Queen",      23, Element.Umbral,  Rarity.Rare,   "Blight Spawn",     new Vector3(65f, -1.5f, -70f));
 
-            // Frosthollow Peaks (center: -55, 55 — radius ~30)
-            SpawnEnemy("Frostwight",          23, Element.Cryo,    Rarity.Common, "Withered Beast",   new Vector3(-45f, 0f, 45f));
-            SpawnEnemy("Glacial Construct",   26, Element.Cryo,    Rarity.Common, "Constructs",       new Vector3(-60f, 0f, 55f));
-            SpawnEnemy("Acolyte Warder",      28, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-50f, 0f, 65f));
-            SpawnEnemy("Avalanche Beast",     31, Element.Cryo,    Rarity.Rare,   "Withered Beast",   new Vector3(-65f, 0f, 70f));
+            // Frosthollow Peaks (center: -55, 55 — height 6)
+            SpawnEnemy("Frostwight",          23, Element.Cryo,    Rarity.Common, "Withered Beast",   new Vector3(-45f, 6f, 45f));
+            SpawnEnemy("Glacial Construct",   26, Element.Cryo,    Rarity.Common, "Constructs",       new Vector3(-60f, 6f, 55f));
+            SpawnEnemy("Acolyte Warder",      28, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-50f, 6f, 65f));
+            SpawnEnemy("Avalanche Beast",     31, Element.Cryo,    Rarity.Rare,   "Withered Beast",   new Vector3(-65f, 6f, 70f));
 
-            // The Withered Heart (center: 55, 55 — radius ~30)
-            SpawnEnemy("Hollow Shade",        32, Element.None,    Rarity.Common, "Blight Spawn",     new Vector3(45f, 0f, 45f));
-            SpawnEnemy("Rootwraith",          35, Element.Verdant, Rarity.Common, "Withered Beast",   new Vector3(60f, 0f, 55f));
-            SpawnEnemy("Wither Knight",       37, Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(50f, 0f, 65f));
-            SpawnEnemy("Blight Colossus",     39, Element.None,    Rarity.Rare,   "Blight Spawn",     new Vector3(65f, 0f, 70f));
+            // The Withered Heart (center: 55, 55 — height 3.5)
+            SpawnEnemy("Hollow Shade",        32, Element.None,    Rarity.Common, "Blight Spawn",     new Vector3(45f, 3.5f, 45f));
+            SpawnEnemy("Rootwraith",          35, Element.Verdant, Rarity.Common, "Withered Beast",   new Vector3(60f, 3.5f, 55f));
+            SpawnEnemy("Wither Knight",       37, Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(50f, 3.5f, 65f));
+            SpawnEnemy("Blight Colossus",     39, Element.None,    Rarity.Rare,   "Blight Spawn",     new Vector3(65f, 3.5f, 70f));
         }
 
         private void SpawnEnemy(string enemyName, int level, Element element, Rarity tier, string category, Vector3 position)
