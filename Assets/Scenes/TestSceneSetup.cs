@@ -81,7 +81,26 @@ namespace SoR.Testing
         private bool _wasAttacking;
 
         // ---- camera ----
-        private readonly Vector3 _cameraOffset = new Vector3(0f, 12f, -8f);
+        private readonly Vector3 _cameraOffset = new Vector3(0f, 18f, -12f);
+
+        // ---- biome zones (name, center, halfExtent, blightLevel, groundColor) ----
+        private struct BiomeZone
+        {
+            public string Name;
+            public Vector3 Center;
+            public float HalfExtent; // square zone: center ± halfExtent on X and Z
+            public float Blight;     // 0..1
+            public Color GroundColor;
+        }
+
+        private BiomeZone[] _biomes;
+
+        // ---- blight HUD ----
+        private Image _blightFill;
+        private Text _blightLabel;
+        private Text _blightZoneName;
+        private float _currentBlight;
+        private string _currentZoneName = "Wilderness";
 
         // ---- cached font ----
         private Font _font;
@@ -192,20 +211,68 @@ namespace SoR.Testing
                 var ground = Instantiate(groundPrefab);
                 ground.name = "Ground";
                 ground.transform.position = Vector3.zero;
+                InitBiomeZones();
                 return;
             }
 
-            // Fallback: primitive plane
-            var plane = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            plane.name = "Ground";
-            plane.transform.position = Vector3.zero;
-            plane.transform.localScale = new Vector3(5f, 1f, 5f); // 50x50
+            InitBiomeZones();
 
-            // Try custom material, else default green
-            var groundMat = TryLoadAsset<Material>("TestAssets/Ground/GroundMaterial");
-            plane.GetComponent<Renderer>().material = groundMat != null
-                ? groundMat
-                : CreateMaterial(new Color(0.35f, 0.55f, 0.3f));
+            // Create a large base plane (200x200)
+            var basePlane = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            basePlane.name = "Ground";
+            basePlane.transform.position = Vector3.zero;
+            basePlane.transform.localScale = new Vector3(20f, 1f, 20f); // 200x200
+            basePlane.GetComponent<Renderer>().material = CreateMaterial(new Color(0.25f, 0.2f, 0.15f)); // dark earth base
+
+            // Create colored biome overlay planes (slightly above base to avoid z-fighting)
+            foreach (var biome in _biomes)
+            {
+                var biomePlane = GameObject.CreatePrimitive(PrimitiveType.Plane);
+                biomePlane.name = $"Biome_{biome.Name.Replace(" ", "_")}";
+                biomePlane.transform.position = biome.Center + Vector3.up * 0.02f;
+                // Each biome zone is 2*halfExtent wide; plane default is 10 units, so scale = halfExtent*2/10
+                float planeScale = biome.HalfExtent * 2f / 10f;
+                biomePlane.transform.localScale = new Vector3(planeScale, 1f, planeScale);
+
+                // Tint biome color darker with blight
+                Color tinted = Color.Lerp(biome.GroundColor, new Color(0.15f, 0.05f, 0.1f), biome.Blight * 0.6f);
+                biomePlane.GetComponent<Renderer>().material = CreateMaterial(tinted);
+            }
+        }
+
+        private void InitBiomeZones()
+        {
+            // Layout on 200x200 map:
+            //   Greenreach Valley  — center (player spawn area)
+            //   Ashen Steppe       — southwest
+            //   Gloomtide Marshes  — southeast
+            //   Frosthollow Peaks  — northwest
+            //   Withered Heart     — north (far, dangerous)
+            _biomes = new[]
+            {
+                new BiomeZone { Name = "Greenreach Valley",  Center = new Vector3(0f, 0f, 0f),     HalfExtent = 35f, Blight = 0.05f, GroundColor = new Color(0.35f, 0.55f, 0.3f) },  // lush green
+                new BiomeZone { Name = "The Ashen Steppe",   Center = new Vector3(-55f, 0f, -55f),  HalfExtent = 30f, Blight = 0.25f, GroundColor = new Color(0.55f, 0.35f, 0.2f) },  // scorched brown
+                new BiomeZone { Name = "Gloomtide Marshes",  Center = new Vector3(55f, 0f, -55f),   HalfExtent = 30f, Blight = 0.40f, GroundColor = new Color(0.2f, 0.35f, 0.25f) },  // dark swamp green
+                new BiomeZone { Name = "Frosthollow Peaks",  Center = new Vector3(-55f, 0f, 55f),   HalfExtent = 30f, Blight = 0.15f, GroundColor = new Color(0.6f, 0.7f, 0.8f) },    // icy blue-gray
+                new BiomeZone { Name = "The Withered Heart",  Center = new Vector3(55f, 0f, 55f),    HalfExtent = 30f, Blight = 0.80f, GroundColor = new Color(0.3f, 0.15f, 0.2f) },   // corrupted dark
+            };
+        }
+
+        /// <summary>Returns the blight level (0..1) for the biome the given position is in.</summary>
+        private float GetBlightAtPosition(Vector3 pos)
+        {
+            if (_biomes == null) return 0f;
+            foreach (var b in _biomes)
+            {
+                if (Mathf.Abs(pos.x - b.Center.x) <= b.HalfExtent &&
+                    Mathf.Abs(pos.z - b.Center.z) <= b.HalfExtent)
+                {
+                    _currentZoneName = b.Name;
+                    return b.Blight;
+                }
+            }
+            _currentZoneName = "Wilderness";
+            return 0f;
         }
 
         private void CreatePlayer()
@@ -316,39 +383,39 @@ namespace SoR.Testing
 
         private void CreateEnemies()
         {
-            // GDD-accurate enemy roster across 5 regional zones
+            // GDD-accurate enemy roster — each enemy in its proper biome zone on the 200x200 map
 
-            // Greenreach Valley (near spawn, z: 3-15, x: -10 to 10)
-            SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(5f, 0f, 5f));
-            SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(-3f, 0f, 7f));
-            SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(8f, 0f, 3f));
-            SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(-6f, 0f, 4f));
-            SpawnEnemy("Corrupted Farmhand",  5,  Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(0f, 0f, 10f));
-            SpawnEnemy("Wither Stag",         8,  Element.Verdant, Rarity.Rare,   "Withered Beast",   new Vector3(0f, 0f, 15f));
+            // Greenreach Valley (center: 0,0 — radius ~35)
+            SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(12f, 0f, 8f));
+            SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(-10f, 0f, 14f));
+            SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(20f, 0f, -5f));
+            SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(-18f, 0f, -8f));
+            SpawnEnemy("Corrupted Farmhand",  5,  Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(5f, 0f, 22f));
+            SpawnEnemy("Wither Stag",         8,  Element.Verdant, Rarity.Rare,   "Withered Beast",   new Vector3(-8f, 0f, 28f));
 
-            // The Ashen Steppe (x: -20 to -5, z: -5 to -18)
-            SpawnEnemy("Dustcrawler",         11, Element.Pyro,    Rarity.Common, "Withered Beast",   new Vector3(-8f, 0f, -6f));
-            SpawnEnemy("Scorched Viper",      13, Element.Pyro,    Rarity.Common, "The Untamed",      new Vector3(-12f, 0f, -10f));
-            SpawnEnemy("Acolyte Ranger",      15, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-15f, 0f, -14f));
-            SpawnEnemy("Ashwalker Golem",     17, Element.Pyro,    Rarity.Rare,   "Constructs",       new Vector3(-10f, 0f, -18f));
+            // The Ashen Steppe (center: -55, -55 — radius ~30)
+            SpawnEnemy("Dustcrawler",         11, Element.Pyro,    Rarity.Common, "Withered Beast",   new Vector3(-45f, 0f, -45f));
+            SpawnEnemy("Scorched Viper",      13, Element.Pyro,    Rarity.Common, "The Untamed",      new Vector3(-60f, 0f, -50f));
+            SpawnEnemy("Acolyte Ranger",      15, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-50f, 0f, -65f));
+            SpawnEnemy("Ashwalker Golem",     17, Element.Pyro,    Rarity.Rare,   "Constructs",       new Vector3(-65f, 0f, -70f));
 
-            // Gloomtide Marshes (x: 5 to 20, z: -5 to -18)
-            SpawnEnemy("Bogfiend",            17, Element.Umbral,  Rarity.Common, "Blight Spawn",     new Vector3(8f, 0f, -6f));
-            SpawnEnemy("Sporecap Horror",     19, Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(12f, 0f, -10f));
-            SpawnEnemy("Drowned Sentinel",    21, Element.Umbral,  Rarity.Common, "Corrupted Human",  new Vector3(15f, 0f, -14f));
-            SpawnEnemy("The Mire Queen",      23, Element.Umbral,  Rarity.Rare,   "Blight Spawn",     new Vector3(10f, 0f, -18f));
+            // Gloomtide Marshes (center: 55, -55 — radius ~30)
+            SpawnEnemy("Bogfiend",            17, Element.Umbral,  Rarity.Common, "Blight Spawn",     new Vector3(45f, 0f, -45f));
+            SpawnEnemy("Sporecap Horror",     19, Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(60f, 0f, -50f));
+            SpawnEnemy("Drowned Sentinel",    21, Element.Umbral,  Rarity.Common, "Corrupted Human",  new Vector3(50f, 0f, -65f));
+            SpawnEnemy("The Mire Queen",      23, Element.Umbral,  Rarity.Rare,   "Blight Spawn",     new Vector3(65f, 0f, -70f));
 
-            // Frosthollow Peaks (x: -20 to -8, z: 5 to 18)
-            SpawnEnemy("Frostwight",          23, Element.Cryo,    Rarity.Common, "Withered Beast",   new Vector3(-10f, 0f, 8f));
-            SpawnEnemy("Glacial Construct",   26, Element.Cryo,    Rarity.Common, "Constructs",       new Vector3(-14f, 0f, 12f));
-            SpawnEnemy("Acolyte Warder",      28, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-18f, 0f, 15f));
-            SpawnEnemy("Avalanche Beast",     31, Element.Cryo,    Rarity.Rare,   "Withered Beast",   new Vector3(-12f, 0f, 18f));
+            // Frosthollow Peaks (center: -55, 55 — radius ~30)
+            SpawnEnemy("Frostwight",          23, Element.Cryo,    Rarity.Common, "Withered Beast",   new Vector3(-45f, 0f, 45f));
+            SpawnEnemy("Glacial Construct",   26, Element.Cryo,    Rarity.Common, "Constructs",       new Vector3(-60f, 0f, 55f));
+            SpawnEnemy("Acolyte Warder",      28, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-50f, 0f, 65f));
+            SpawnEnemy("Avalanche Beast",     31, Element.Cryo,    Rarity.Rare,   "Withered Beast",   new Vector3(-65f, 0f, 70f));
 
-            // The Withered Heart (x: 8 to 20, z: 5 to 18)
-            SpawnEnemy("Hollow Shade",        32, Element.None,    Rarity.Common, "Blight Spawn",     new Vector3(10f, 0f, 8f));
-            SpawnEnemy("Rootwraith",          35, Element.Verdant, Rarity.Common, "Withered Beast",   new Vector3(14f, 0f, 12f));
-            SpawnEnemy("Wither Knight",       37, Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(18f, 0f, 15f));
-            SpawnEnemy("Blight Colossus",     39, Element.None,    Rarity.Rare,   "Blight Spawn",     new Vector3(12f, 0f, 18f));
+            // The Withered Heart (center: 55, 55 — radius ~30)
+            SpawnEnemy("Hollow Shade",        32, Element.None,    Rarity.Common, "Blight Spawn",     new Vector3(45f, 0f, 45f));
+            SpawnEnemy("Rootwraith",          35, Element.Verdant, Rarity.Common, "Withered Beast",   new Vector3(60f, 0f, 55f));
+            SpawnEnemy("Wither Knight",       37, Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(50f, 0f, 65f));
+            SpawnEnemy("Blight Colossus",     39, Element.None,    Rarity.Rare,   "Blight Spawn",     new Vector3(65f, 0f, 70f));
         }
 
         private void SpawnEnemy(string enemyName, int level, Element element, Rarity tier, string category, Vector3 position)
@@ -550,6 +617,91 @@ namespace SoR.Testing
 
             _verdanceFill = CreateHUDBar(canvasGo.transform, "VerdanceBar",
                 new Vector2(20f, -55f), new Color(0.2f, 0.75f, 0.3f), "VP");
+
+            CreateBlightMeter(canvasGo.transform);
+        }
+
+        private void CreateBlightMeter(Transform hudParent)
+        {
+            // Container — anchored to right side, tall vertical bar
+            var container = new GameObject("BlightMeter");
+            container.transform.SetParent(hudParent, false);
+            var cRt = container.AddComponent<RectTransform>();
+            cRt.anchorMin = new Vector2(1f, 0.2f);  // right side, 20% from bottom
+            cRt.anchorMax = new Vector2(1f, 0.8f);   // up to 80%
+            cRt.pivot = new Vector2(1f, 0f);
+            cRt.anchoredPosition = new Vector2(-20f, 0f);
+            cRt.sizeDelta = new Vector2(30f, 0f);    // 30px wide, height from anchors
+
+            // Background
+            var bg = new GameObject("Bg");
+            bg.transform.SetParent(container.transform, false);
+            var bgImg = bg.AddComponent<Image>();
+            bgImg.color = new Color(0.1f, 0.1f, 0.1f, 0.85f);
+            var bgRt = bg.GetComponent<RectTransform>();
+            bgRt.anchorMin = Vector2.zero;
+            bgRt.anchorMax = Vector2.one;
+            bgRt.offsetMin = Vector2.zero;
+            bgRt.offsetMax = Vector2.zero;
+
+            // Fill — grows upward (anchorMax.y driven by blight level)
+            var fill = new GameObject("Fill");
+            fill.transform.SetParent(container.transform, false);
+            _blightFill = fill.AddComponent<Image>();
+            _blightFill.color = new Color(0.5f, 0.1f, 0.5f, 0.9f);
+            var fillRt = fill.GetComponent<RectTransform>();
+            fillRt.anchorMin = Vector2.zero;
+            fillRt.anchorMax = new Vector2(1f, 0f); // starts empty, anchorMax.y set in update
+            fillRt.offsetMin = new Vector2(2f, 2f);
+            fillRt.offsetMax = new Vector2(-2f, -2f);
+
+            // Label "BLIGHT" at top
+            var titleGo = new GameObject("Title");
+            titleGo.transform.SetParent(container.transform, false);
+            var titleText = titleGo.AddComponent<Text>();
+            titleText.text = "BLIGHT";
+            titleText.font = _font;
+            titleText.fontSize = 11;
+            titleText.color = new Color(0.8f, 0.5f, 0.8f);
+            titleText.alignment = TextAnchor.UpperCenter;
+            var titleRt = titleGo.GetComponent<RectTransform>();
+            titleRt.anchorMin = new Vector2(0f, 1f);
+            titleRt.anchorMax = new Vector2(1f, 1f);
+            titleRt.pivot = new Vector2(0.5f, 0f);
+            titleRt.anchoredPosition = new Vector2(0f, 4f);
+            titleRt.sizeDelta = new Vector2(0f, 20f);
+
+            // Percentage label at bottom
+            var pctGo = new GameObject("Pct");
+            pctGo.transform.SetParent(container.transform, false);
+            _blightLabel = pctGo.AddComponent<Text>();
+            _blightLabel.text = "0%";
+            _blightLabel.font = _font;
+            _blightLabel.fontSize = 12;
+            _blightLabel.color = Color.white;
+            _blightLabel.alignment = TextAnchor.LowerCenter;
+            var pctRt = pctGo.GetComponent<RectTransform>();
+            pctRt.anchorMin = Vector2.zero;
+            pctRt.anchorMax = new Vector2(1f, 0f);
+            pctRt.pivot = new Vector2(0.5f, 1f);
+            pctRt.anchoredPosition = new Vector2(0f, -4f);
+            pctRt.sizeDelta = new Vector2(0f, 18f);
+
+            // Zone name label (above the bar)
+            var zoneGo = new GameObject("ZoneName");
+            zoneGo.transform.SetParent(container.transform, false);
+            _blightZoneName = zoneGo.AddComponent<Text>();
+            _blightZoneName.text = "";
+            _blightZoneName.font = _font;
+            _blightZoneName.fontSize = 12;
+            _blightZoneName.color = new Color(0.9f, 0.8f, 0.6f);
+            _blightZoneName.alignment = TextAnchor.LowerCenter;
+            var zoneRt = zoneGo.GetComponent<RectTransform>();
+            zoneRt.anchorMin = new Vector2(0f, 1f);
+            zoneRt.anchorMax = new Vector2(1f, 1f);
+            zoneRt.pivot = new Vector2(0.5f, 0f);
+            zoneRt.anchoredPosition = new Vector2(0f, 22f);
+            zoneRt.sizeDelta = new Vector2(80f, 18f);
         }
 
         private Image CreateHUDBar(Transform parent, string barName, Vector2 position,
@@ -632,7 +784,13 @@ namespace SoR.Testing
             // Skip if player is invincible (dodging) or god mode
             if (_playerController.IsInvincible || GodMode) return;
 
-            _playerHealth = Mathf.Max(0f, _playerHealth - damage);
+            // Blight makes enemies stronger
+            float blightedDamage = damage * BlightEnemyMultiplier;
+            _playerHealth = Mathf.Max(0f, _playerHealth - blightedDamage);
+
+            // Blight also caps effective max health
+            float effectiveMax = _playerMaxHealth * BlightPlayerMultiplier;
+            _playerHealth = Mathf.Min(_playerHealth, effectiveMax);
 
             if (_playerHealth <= 0f)
                 _playerController.StateMachine.ChangeState(_playerController.DeathState);
@@ -653,7 +811,10 @@ namespace SoR.Testing
         {
             if (_healthFill != null)
             {
-                float pct = _playerMaxHealth > 0f ? _playerHealth / _playerMaxHealth : 0f;
+                // Show health relative to blight-reduced effective max
+                float effectiveMax = _playerMaxHealth * BlightPlayerMultiplier;
+                _playerHealth = Mathf.Min(_playerHealth, effectiveMax);
+                float pct = effectiveMax > 0f ? _playerHealth / effectiveMax : 0f;
                 SetBarFill(_healthFill.rectTransform, pct);
             }
             if (_verdanceFill != null)
@@ -661,7 +822,51 @@ namespace SoR.Testing
                 float pct = _playerMaxVerdance > 0f ? _playerVerdance / _playerMaxVerdance : 0f;
                 SetBarFill(_verdanceFill.rectTransform, pct);
             }
+            UpdateBlightMeter();
         }
+
+        private void UpdateBlightMeter()
+        {
+            if (_player == null) return;
+
+            _currentBlight = GetBlightAtPosition(_player.transform.position);
+
+            if (_blightFill != null)
+            {
+                // Fill upward: anchorMax.y = blight level
+                var fillRt = _blightFill.rectTransform;
+                var max = fillRt.anchorMax;
+                max.y = _currentBlight;
+                fillRt.anchorMax = max;
+                fillRt.offsetMax = new Vector2(-2f, 0f);
+
+                // Color lerp: low blight = dim purple, high blight = angry red
+                _blightFill.color = Color.Lerp(
+                    new Color(0.4f, 0.15f, 0.5f, 0.9f),
+                    new Color(0.9f, 0.1f, 0.15f, 0.95f),
+                    _currentBlight);
+            }
+
+            if (_blightLabel != null)
+                _blightLabel.text = $"{_currentBlight * 100f:F0}%";
+
+            if (_blightZoneName != null)
+                _blightZoneName.text = _currentZoneName;
+        }
+
+        /// <summary>
+        /// Blight penalty multiplier for player/companion damage and health.
+        /// At 0% blight: 1.0 (no penalty). At 80% blight: 0.6 (40% weaker).
+        /// Formula: 1 - blight * 0.5
+        /// </summary>
+        public float BlightPlayerMultiplier => 1f - _currentBlight * 0.5f;
+
+        /// <summary>
+        /// Blight bonus multiplier for enemy damage.
+        /// At 0% blight: 1.0 (no bonus). At 80% blight: 1.4 (40% stronger).
+        /// Formula: 1 + blight * 0.5
+        /// </summary>
+        public float BlightEnemyMultiplier => 1f + _currentBlight * 0.5f;
 
         private static void SetBarFill(RectTransform fillRt, float fraction)
         {
@@ -724,7 +929,8 @@ namespace SoR.Testing
                 if (_hitThisSwing.Contains(id)) continue;
                 _hitThisSwing.Add(id);
 
-                float damageMultiplier = OneHitKill ? 9999f : _partyDamageBonus;
+                // Blight weakens player damage
+                float damageMultiplier = OneHitKill ? 9999f : _partyDamageBonus * BlightPlayerMultiplier;
                 combat.ProcessAttack(
                     _player,
                     ai.gameObject,
@@ -981,13 +1187,14 @@ namespace SoR.Testing
             StatBlock attackerStats = GetCompanionStatBlock(companionId, level);
             StatBlock defenderStats = enemyAI.Definition != null ? enemyAI.Definition.BaseStats : default;
 
+            // Blight weakens companion damage too
             combat.ProcessAttack(
                 companionGo,
                 enemyAI.gameObject,
                 _companionWeapon,
                 attackerStats,
                 defenderStats,
-                1f,
+                BlightPlayerMultiplier,
                 false);
         }
 
