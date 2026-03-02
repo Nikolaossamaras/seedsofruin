@@ -11,6 +11,11 @@ namespace SoR.Combat
         [TextArea(2, 4)]
         public string Description;
 
+        [Header("Classification")]
+        public WeaponType WeaponType;
+        public Rarity Rarity;
+        public float Range = 2f;
+
         [Header("Stats")]
         public float BaseDamage;
         public float BaseStagger;
@@ -23,6 +28,10 @@ namespace SoR.Combat
 
         [Header("Combo")]
         public int MaxComboHits = 4;
+
+        [Header("Special")]
+        [TextArea(1, 3)]
+        public string UniquePassive;
 
         [Header("UI")]
         public Sprite Icon;

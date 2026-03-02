@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using SoR.Core;
 using SoR.Shared;
+using SoR.Combat;
 using SoR.Systems.Inventory;
 using SoR.Systems.Crafting;
 using SoR.Systems.Gacha;
@@ -82,6 +83,17 @@ namespace SoR.Testing
         private readonly Dictionary<string, int> _companionLevels = new(); // companionId → level (1-45)
         private int _playerLevel = 1;
 
+        // ---- guild system ----
+        private int _guildReputation = 0;
+        private int _guildContractsCompleted = 0;
+        private int _guildTab = 0; // 0=Info, 1=Contracts, 2=Active, 3=Turn In
+        private readonly Dictionary<string, (int RequiredRank, int ReputationReward)> _guildContractMeta = new();
+
+        // ---- weapon system ----
+        private readonly Dictionary<string, WeaponDefinitionSO> _weaponDefs = new();
+        private readonly HashSet<string> _ownedWeapons = new();
+        private string _equippedWeaponId;
+
         private void Start()
         {
             _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -150,7 +162,10 @@ namespace SoR.Testing
                     var nearNpc = _sceneSetup.GetNearestNPC(3.5f);
                     if (nearNpc.HasValue)
                     {
-                        ShowShopForNPC(nearNpc.Value);
+                        if (nearNpc.Value.ShopId == "adventure_guild")
+                            ShowGuild();
+                        else
+                            ShowShopForNPC(nearNpc.Value);
                         return;
                     }
                 }
@@ -251,6 +266,26 @@ namespace SoR.Testing
                 CraftingDiscipline.Runebinding, 3,
                 ("runic_dust", 4), ("moonstone", 1)));
 
+            // --- Weapon Crafting (Rare tier) ---
+            _testRecipes.Add(CreateRecipe("Verdant Scythe", "verdant_scythe",
+                CraftingDiscipline.Forging, 3,
+                ("iron_ore", 10), ("ancient_seed", 2), ("verdance_shard", 3)));
+            _testRecipes.Add(CreateRecipe("Blazeforged Hoe-Blade", "blazeforged_hoeblade",
+                CraftingDiscipline.Forging, 4,
+                ("iron_ore", 12), ("fire_crystal", 3)));
+            _testRecipes.Add(CreateRecipe("Frost Sickle & Shield", "frost_sickle_shield",
+                CraftingDiscipline.Forging, 3,
+                ("iron_ore", 8), ("moonstone", 1), ("runic_dust", 4)));
+            _testRecipes.Add(CreateRecipe("Runic Pitchfork", "runic_pitchfork",
+                CraftingDiscipline.Runebinding, 4,
+                ("iron_ore", 10), ("runic_dust", 6), ("moonstone", 1)));
+            _testRecipes.Add(CreateRecipe("Elemental Seed Sling", "elemental_sling",
+                CraftingDiscipline.Seedcraft, 3,
+                ("silk_thread", 5), ("fire_crystal", 2), ("ancient_seed", 1)));
+            _testRecipes.Add(CreateRecipe("Apprentice's Druid Staff", "apprentice_staff",
+                CraftingDiscipline.Herbalism, 4,
+                ("ancient_seed", 2), ("herb_bundle", 10), ("runic_dust", 3)));
+
             // --- Shops (all 6 GDD shops) ---
             SeedAllShops();
 
@@ -293,11 +328,69 @@ namespace SoR.Testing
                 new[] { ("Collect herb bundles", ObjectiveType.Collect, "herb_bundle", 10) },
                 new[] { ("verdance_shard", 1, 50, 30) }));
 
-            _testQuests.Add(CreateQuest("The Forgemaster's Test", "quest_forge_01",
-                QuestType.GuildContract,
+            // --- Guild Contracts (10 total) ---
+            _testQuests.Add(CreateGuildContract("The Forgemaster's Test", "quest_forge_01",
                 "Craft an iron blade to prove your skill.",
+                0, 25,
                 new[] { ("Craft an Iron Blade", ObjectiveType.Craft, "iron_blade", 1) },
                 new[] { ("fire_crystal", 2, 200, 100) }));
+
+            _testQuests.Add(CreateGuildContract("Wolf Pelts Wanted", "guild_wolf_pelts",
+                "The guild needs wolf pelts for its supply stores.",
+                0, 25,
+                new[] { ("Collect wolf pelts", ObjectiveType.Collect, "wolf_pelt", 5) },
+                new[] { ("health_potion", 3, 80, 60) }));
+
+            _testQuests.Add(CreateGuildContract("Scorched Earth Patrol", "guild_scorched_patrol",
+                "Patrol the Ashen Steppe and eliminate scorched husks threatening travelers.",
+                1, 50,
+                new[] { ("Kill scorched husks", ObjectiveType.Kill, "scorched_husk", 6) },
+                new[] { ("fire_crystal", 3, 200, 120) }));
+
+            _testQuests.Add(CreateGuildContract("Fire Mineral Survey", "guild_fire_minerals",
+                "Collect fire minerals from the volcanic vents in the steppe.",
+                1, 50,
+                new[] { ("Collect fire minerals", ObjectiveType.Collect, "fire_mineral", 8) },
+                new[] { ("runic_dust", 5, 180, 100) }));
+
+            _testQuests.Add(CreateGuildContract("Marsh Wraith Bounty", "guild_marsh_wraith",
+                "Marsh wraiths are terrorizing the Gloomtide Marshes. Eliminate them.",
+                2, 75,
+                new[] { ("Kill marsh wraiths", ObjectiveType.Kill, "marsh_wraith", 8) },
+                new[] { ("shadow_essence", 2, 300, 180) }));
+
+            _testQuests.Add(CreateGuildContract("Fungal Specimen Collection", "guild_fungal_specimens",
+                "Collect rare fungal specimens for the guild's research division.",
+                2, 75,
+                new[] { ("Collect fungal specimens", ObjectiveType.Collect, "fungal_specimen", 10) },
+                new[] { ("fungal_extract", 4, 250, 150) }));
+
+            _testQuests.Add(CreateGuildContract("Frost Sentinel Extermination", "guild_frost_sentinels",
+                "Frost sentinels have overrun the mountain passes. Clear them out.",
+                3, 100,
+                new[] { ("Kill frost sentinels", ObjectiveType.Kill, "frost_sentinel", 10) },
+                new[] { ("frost_shard", 4, 400, 250) }));
+
+            _testQuests.Add(CreateGuildContract("Ancient Scroll Recovery", "guild_ancient_scrolls",
+                "Recover ancient scrolls scattered across the Frosthollow Peaks.",
+                3, 100,
+                new[] { ("Collect ancient scrolls", ObjectiveType.Collect, "ancient_scroll", 5) },
+                new[] { ("runic_core", 1, 450, 300) }));
+
+            _testQuests.Add(CreateGuildContract("Blight Nexus Purge", "guild_blight_nexus",
+                "Locate and purge blight nexus points before they spread further.",
+                4, 150,
+                new[] {
+                    ("Explore blight nexus sites", ObjectiveType.Explore, "blight_nexus", 5),
+                    ("Kill nexus guardians", ObjectiveType.Kill, "nexus_guardian", 8)
+                },
+                new[] { ("blight_ward", 1, 600, 400) }));
+
+            _testQuests.Add(CreateGuildContract("The Wither Knight Hunt", "guild_wither_knight",
+                "A legendary wither knight has been sighted. Only the guild's finest should attempt this.",
+                4, 150,
+                new[] { ("Kill wither knights", ObjectiveType.Kill, "wither_knight", 3) },
+                new[] { ("dark_crystal", 2, 800, 500) }));
 
             _testQuests.Add(CreateQuest("Lyra's Memory", "quest_lyra_01",
                 QuestType.CompanionQuest,
@@ -460,6 +553,134 @@ namespace SoR.Testing
             // Accept the first two quests
             _questManager.AcceptQuest(_testQuests[0]);
             _questManager.AcceptQuest(_testQuests[1]);
+
+            // --- Weapons ---
+            SeedWeapons();
+        }
+
+        // ================================================================
+        // Weapon definitions
+        // ================================================================
+
+        private WeaponDefinitionSO CreateWeaponDef(string id, string name, string desc,
+            WeaponType wType, Rarity rarity, float damage, float stagger, float speed,
+            float charged, float range, int combo, DamageType dmgType, Element element,
+            string passive = null)
+        {
+            var w = ScriptableObject.CreateInstance<WeaponDefinitionSO>();
+            w.WeaponName = name;
+            w.Description = desc;
+            w.WeaponType = wType;
+            w.Rarity = rarity;
+            w.BaseDamage = damage;
+            w.BaseStagger = stagger;
+            w.AttackSpeed = speed;
+            w.ChargedMultiplier = charged;
+            w.Range = range;
+            w.MaxComboHits = combo;
+            w.DamageType = dmgType;
+            w.Element = element;
+            w.UniquePassive = passive;
+            _weaponDefs[id] = w;
+            return w;
+        }
+
+        private void SeedWeapons()
+        {
+            // ---- COMMON (shop buyable) ----
+            CreateWeaponDef("rusty_scythe", "Rusty Scythe", "A weathered scythe. Still cuts.",
+                WeaponType.Scythe, Rarity.Common, 28f, 8f, 1.1f, 1.5f, 2.5f, 3, DamageType.Physical, Element.None);
+            CreateWeaponDef("farmers_hoeblade", "Farmer's Hoe-Blade", "Repurposed farm tool with a sharp edge.",
+                WeaponType.HoeBlade, Rarity.Common, 38f, 14f, 0.8f, 1.8f, 2f, 2, DamageType.Physical, Element.None);
+            CreateWeaponDef("old_sickle_buckler", "Old Sickle & Buckler", "A bent sickle paired with a dented shield.",
+                WeaponType.SickleShield, Rarity.Common, 20f, 5f, 1.5f, 1.3f, 1.5f, 4, DamageType.Physical, Element.None);
+            CreateWeaponDef("worn_pitchfork", "Worn Pitchfork", "Three rusty prongs, still pointy.",
+                WeaponType.PitchforkSpear, Rarity.Common, 30f, 9f, 1.0f, 1.5f, 3.5f, 3, DamageType.Physical, Element.None);
+            CreateWeaponDef("basic_seed_sling", "Basic Seed Sling", "Launches seed bombs at short range.",
+                WeaponType.SeedSling, Rarity.Common, 22f, 3f, 1.6f, 1.4f, 6f, 3, DamageType.Magical, Element.Verdant);
+
+            // ---- UNCOMMON (shop buyable + some craftable) ----
+            CreateWeaponDef("iron_scythe", "Iron Scythe", "Forged iron blade with balanced weight.",
+                WeaponType.Scythe, Rarity.Uncommon, 42f, 12f, 1.2f, 1.5f, 2.5f, 3, DamageType.Physical, Element.None,
+                "Attacks hit enemies in a wider arc.");
+            CreateWeaponDef("steel_hoeblade", "Steel Hoe-Blade", "Bram's forge-tempered steel chopper.",
+                WeaponType.HoeBlade, Rarity.Uncommon, 55f, 18f, 0.85f, 1.8f, 2f, 2, DamageType.Physical, Element.None,
+                "+15% stagger damage.");
+            CreateWeaponDef("guards_sickle", "Guard's Sickle & Shield", "Standard issue for town guards.",
+                WeaponType.SickleShield, Rarity.Uncommon, 30f, 7f, 1.6f, 1.3f, 1.5f, 4, DamageType.Physical, Element.None,
+                "Blocking reduces 10% more damage.");
+            CreateWeaponDef("iron_pitchfork", "Iron Pitchfork Spear", "Reinforced prongs on a sturdy shaft.",
+                WeaponType.PitchforkSpear, Rarity.Uncommon, 44f, 13f, 1.05f, 1.5f, 3.5f, 3, DamageType.Physical, Element.None,
+                "Charge attack has extended reach.");
+            CreateWeaponDef("reinforced_sling", "Reinforced Seed Sling", "Better pouch, better range.",
+                WeaponType.SeedSling, Rarity.Uncommon, 34f, 5f, 1.7f, 1.4f, 7f, 3, DamageType.Magical, Element.Verdant,
+                "+10% projectile speed.");
+
+            // ---- RARE (craftable at Bram's Forge) ----
+            CreateWeaponDef("verdant_scythe", "Verdant Scythe", "Infused with living vines that extend its reach.",
+                WeaponType.Scythe, Rarity.Rare, 60f, 16f, 1.2f, 1.6f, 3f, 4, DamageType.Physical, Element.Verdant,
+                "Attacks leave a verdant trail that heals 1% HP. AoE radius +20%.");
+            CreateWeaponDef("blazeforged_hoeblade", "Blazeforged Hoe-Blade", "Forged in volcanic flame, glows red-hot.",
+                WeaponType.HoeBlade, Rarity.Rare, 75f, 22f, 0.9f, 2.0f, 2f, 3, DamageType.Physical, Element.Pyro,
+                "Charged attacks ignite targets. +25% guard break.");
+            CreateWeaponDef("frost_sickle_shield", "Frost Sickle & Shield", "Ice-tempered blade with a frost-ward shield.",
+                WeaponType.SickleShield, Rarity.Rare, 40f, 10f, 1.7f, 1.4f, 1.5f, 4, DamageType.Physical, Element.Cryo,
+                "Perfect blocks freeze attacker for 1s. +15% block efficiency.");
+            CreateWeaponDef("runic_pitchfork", "Runic Pitchfork", "Ancient runes glow along the shaft.",
+                WeaponType.PitchforkSpear, Rarity.Rare, 58f, 17f, 1.1f, 1.6f, 4f, 3, DamageType.Physical, Element.Geo,
+                "Thrusts create a shockwave at max range. Charge attack pins enemies.");
+            CreateWeaponDef("elemental_sling", "Elemental Seed Sling", "Channels elemental energy into each shot.",
+                WeaponType.SeedSling, Rarity.Rare, 48f, 7f, 1.8f, 1.5f, 8f, 4, DamageType.Magical, Element.Verdant,
+                "Shots cycle through Pyro/Cryo/Volt elements. +20% projectile damage.");
+            CreateWeaponDef("apprentice_staff", "Apprentice's Druid Staff", "A staff given to those who begin the druid path.",
+                WeaponType.DruidStaff, Rarity.Rare, 65f, 8f, 0.75f, 2.0f, 3f, 2, DamageType.Magical, Element.Verdant,
+                "Verdance skills cost 15% less. +10 Verdance stat.");
+
+            // ---- EPIC (boss drops / hidden quests) ----
+            CreateWeaponDef("reapers_crescent", "Reaper's Crescent", "A crescent blade that drinks the life of the fallen.",
+                WeaponType.Scythe, Rarity.Epic, 85f, 20f, 1.3f, 1.7f, 3f, 4, DamageType.Physical, Element.Umbral,
+                "Kills restore 5% max HP. AoE attacks apply Shadow Blight for 3s. +15% crit chance.");
+            CreateWeaponDef("earthshatter", "Earthshatter", "Each swing cracks the earth beneath it.",
+                WeaponType.HoeBlade, Rarity.Epic, 100f, 30f, 0.9f, 2.2f, 2.5f, 3, DamageType.Physical, Element.Geo,
+                "Ground strikes create fissures dealing 30% bonus AoE. Staggered enemies take +25% damage. Guard break guaranteed.");
+            CreateWeaponDef("aegis_of_thorns", "Aegis of Thorns", "Living thorns grow across shield and blade.",
+                WeaponType.SickleShield, Rarity.Epic, 52f, 12f, 1.8f, 1.5f, 1.5f, 5, DamageType.Physical, Element.Verdant,
+                "Blocking reflects 20% damage as thorns. Perfect block heals 3% HP. +20% block efficiency.");
+            CreateWeaponDef("blight_piercer", "Blight Piercer", "A corrupted spear that drains the land's vitality.",
+                WeaponType.PitchforkSpear, Rarity.Epic, 78f, 20f, 1.15f, 1.7f, 4.5f, 4, DamageType.Physical, Element.Umbral,
+                "Thrusts apply Blight (DoT 2% per sec for 4s). Charge attack pierces through enemies. +20% range.");
+            CreateWeaponDef("storm_sling", "Storm Sling", "Channels lightning through every seed.",
+                WeaponType.SeedSling, Rarity.Epic, 65f, 10f, 2.0f, 1.6f, 9f, 4, DamageType.Magical, Element.Volt,
+                "Shots chain lightning to 2 nearby enemies. Crits cause a thunderclap AoE. +25% attack speed.");
+            CreateWeaponDef("elder_druid_staff", "Elder Druid Staff", "Carved from the heartwood of the World Tree.",
+                WeaponType.DruidStaff, Rarity.Epic, 90f, 12f, 0.8f, 2.2f, 3.5f, 3, DamageType.Magical, Element.Verdant,
+                "Verdance skills cost 25% less. Attacks summon healing spores. +20 Verdance stat. +15% magic damage.");
+
+            // ---- LEGENDARY (final bosses / secret content) ----
+            CreateWeaponDef("millhavens_memory", "Millhaven's Memory", "The scythe remembers every harvest, and gives back.",
+                WeaponType.Scythe, Rarity.Legendary, 110f, 25f, 1.3f, 1.8f, 3.5f, 4, DamageType.Physical, Element.Verdant,
+                "Attacks heal 3% of damage dealt. Glows with golden light. AoE +30%. On kill: burst heal 8% to nearby allies.");
+            CreateWeaponDef("ashwoods_regret", "Ashwood's Regret", "A druid's remorse given form — vines and sorrow.",
+                WeaponType.DruidStaff, Rarity.Legendary, 120f, 15f, 0.85f, 2.5f, 4f, 3, DamageType.Magical, Element.Verdant,
+                "Verdance skills cost 30% less. Crits summon spectral vines that root enemies for 2s. +30 Verdance. +25% magic damage.");
+            CreateWeaponDef("withered_throne", "The Withered Throne", "Power demands a price — your very life force.",
+                WeaponType.HoeBlade, Rarity.Legendary, 140f, 35f, 0.95f, 2.5f, 2.5f, 3, DamageType.Physical, Element.Umbral,
+                "+50% damage, but -1% max HP per hit. Dark corruption visual. Kills restore 3% max HP. Stagger damage doubled.");
+            CreateWeaponDef("scarecrows_fang", "Scarecrow's Fang", "The crows still remember its terror.",
+                WeaponType.SickleShield, Rarity.Legendary, 68f, 15f, 2.0f, 1.6f, 2f, 5, DamageType.Physical, Element.Umbral,
+                "Perfect blocks terrify all nearby enemies for 3s. +30% block efficiency. Terrified enemies take +20% damage. Counter-attacks deal double.");
+            CreateWeaponDef("primordial_root", "The Primordial Root", "Born from the first seed, older than memory.",
+                WeaponType.PitchforkSpear, Rarity.Legendary, 95f, 25f, 1.2f, 1.8f, 5f, 4, DamageType.Physical, Element.Verdant,
+                "Attacks plant seeds that explode after 2s for AoE damage. Charge attack summons root cage. +25% range. On kill: grow a healing flower.");
+
+            // Give player starting weapons
+            _ownedWeapons.Add("rusty_scythe");
+            _ownedWeapons.Add("old_sickle_buckler");
+            _equippedWeaponId = "rusty_scythe";
+
+            // Apply starting weapon to scene
+            if (_sceneSetup != null && _weaponDefs.TryGetValue(_equippedWeaponId, out var startWeapon))
+                _sceneSetup.SetActiveWeapon(startWeapon);
         }
 
         // ================================================================
@@ -479,11 +700,19 @@ namespace SoR.Testing
 
             CreateAndRegisterShop("brams_forge", "Bram's Forge", new[]
             {
-                ("iron_sword", 250, 3),
-                ("steel_shield", 400, 2),
                 ("iron_ore", 25, -1),
                 ("repair_kit", 100, 5),
                 ("reinforced_helm", 350, 2),
+                // Common weapons
+                ("rusty_scythe", 120, 3),
+                ("farmers_hoeblade", 150, 3),
+                ("old_sickle_buckler", 100, 3),
+                ("worn_pitchfork", 130, 3),
+                // Uncommon weapons
+                ("iron_scythe", 400, 2),
+                ("steel_hoeblade", 500, 2),
+                ("guards_sickle", 350, 2),
+                ("iron_pitchfork", 420, 2),
             });
 
             CreateAndRegisterShop("seed_merchant", "Silas's Curious Seeds", new[]
@@ -492,6 +721,8 @@ namespace SoR.Testing
                 ("blight_resistant_seed", 150, 5),
                 ("verdant_bulb", 80, -1),
                 ("growth_elixir", 120, 8),
+                ("basic_seed_sling", 140, 2),
+                ("reinforced_sling", 380, 1),
             });
 
             CreateAndRegisterShop("guild_quartermaster", "Guild Quartermaster", new[]
@@ -626,10 +857,16 @@ namespace SoR.Testing
                     ? _guildTokens >= item.Price
                     : _shop.CanBuy(shopDef.ShopId, item.ItemId, _gold);
                 bool inStock = item.Stock != 0;
-                bool canBuy = canAfford && inStock;
-                Color color = canBuy ? Color.white : new Color(0.5f, 0.5f, 0.5f);
+                bool alreadyOwned = _weaponDefs.ContainsKey(item.ItemId) && _ownedWeapons.Contains(item.ItemId);
+                bool canBuy = canAfford && inStock && !alreadyOwned;
+                Color color = !canBuy ? new Color(0.5f, 0.5f, 0.5f)
+                    : _weaponDefs.ContainsKey(item.ItemId) ? WeaponRarityColor(_weaponDefs[item.ItemId].Rarity)
+                    : Color.white;
 
-                string line = $"  {FormatItemName(item.ItemId)}   {priceTag}   Stock: {stockStr}";
+                bool isWeapon = _weaponDefs.TryGetValue(item.ItemId, out var shopWeapon);
+                string ownedTag = alreadyOwned ? "  [OWNED]" : "";
+                string weaponTag = isWeapon ? $"  [{WeaponTypeName(shopWeapon.WeaponType)}] DMG {shopWeapon.BaseDamage:F0}" : "";
+                string line = $"  {FormatItemName(item.ItemId)}{weaponTag}   {priceTag}   Stock: {stockStr}{ownedTag}";
                 AddRowLabel(content, line, row, color);
 
                 string capturedShopId = shopDef.ShopId;
@@ -669,13 +906,17 @@ namespace SoR.Testing
                 if (_shop.Buy(shopId, itemId, ref tempGold))
                 {
                     _guildTokens -= target.Price;
+                    if (_weaponDefs.ContainsKey(itemId)) _ownedWeapons.Add(itemId);
                     Debug.Log($"[Shop] Bought {itemId} for {target.Price} Guild Tokens");
                 }
             }
             else
             {
                 if (_shop.Buy(shopId, itemId, ref _gold))
+                {
+                    if (_weaponDefs.ContainsKey(itemId)) _ownedWeapons.Add(itemId);
                     Debug.Log($"[Shop] Bought {itemId}");
+                }
             }
         }
 
@@ -837,29 +1078,155 @@ namespace SoR.Testing
             var panel = CreateScreenPanel("Equipment");
             var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
 
-            string[] slotNames = { "Weapon", "Head", "Chest", "Legs", "Accessory" };
-            EquipmentSlot[] slots = {
-                EquipmentSlot.Weapon, EquipmentSlot.Head, EquipmentSlot.Chest,
+            int row = 0;
+
+            // ---- Equipped Weapon Detail ----
+            AddRowLabel(content, "  --- Equipped Weapon ---", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+
+            if (!string.IsNullOrEmpty(_equippedWeaponId) && _weaponDefs.TryGetValue(_equippedWeaponId, out var equipped))
+            {
+                Color rarityCol = WeaponRarityColor(equipped.Rarity);
+                AddRowLabel(content, $"  {equipped.WeaponName}", row, rarityCol); row++;
+                AddRowLabel(content, $"    Type: {WeaponTypeName(equipped.WeaponType)}   Rarity: {WeaponRarityName(equipped.Rarity)}", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+                AddRowLabel(content, $"    DMG {equipped.BaseDamage:F0}  SPD {equipped.AttackSpeed:F1}  STG {equipped.BaseStagger:F0}  RNG {equipped.Range:F1}  Combo {equipped.MaxComboHits}", row, Color.white); row++;
+                AddRowLabel(content, $"    Charged: {equipped.ChargedMultiplier:F1}x   {equipped.DamageType} / {equipped.Element}", row, Color.white); row++;
+                if (!string.IsNullOrEmpty(equipped.UniquePassive))
+                {
+                    AddRowLabel(content, $"    {equipped.UniquePassive}", row, new Color(1f, 0.8f, 0.4f)); row++;
+                }
+            }
+            else
+            {
+                AddRowLabel(content, "  (no weapon equipped)", row, Color.gray); row++;
+            }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- Other Equipment Slots ----
+            AddRowLabel(content, "  --- Armor & Accessories ---", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+            string[] armorSlotNames = { "Head", "Chest", "Legs", "Accessory" };
+            EquipmentSlot[] armorSlots = {
+                EquipmentSlot.Head, EquipmentSlot.Chest,
                 EquipmentSlot.Legs, EquipmentSlot.Accessory
             };
-
-            for (int i = 0; i < slots.Length; i++)
+            for (int i = 0; i < armorSlots.Length; i++)
             {
-                string equipped = _equipment.GetEquipped(slots[i]);
-                string display = string.IsNullOrEmpty(equipped) ? "(empty)" : FormatItemName(equipped);
-                Color color = string.IsNullOrEmpty(equipped) ? Color.gray : new Color(0.6f, 0.85f, 1f);
-                AddRowLabel(content, $"  [{slotNames[i]}]  {display}", i, color);
+                string eq = _equipment.GetEquipped(armorSlots[i]);
+                string display = string.IsNullOrEmpty(eq) ? "(empty)" : FormatItemName(eq);
+                Color color = string.IsNullOrEmpty(eq) ? Color.gray : new Color(0.6f, 0.85f, 1f);
+                AddRowLabel(content, $"  [{armorSlotNames[i]}]  {display}", row, color); row++;
             }
 
             // Stat bonuses
             var stats = _equipment.GetTotalStatBonuses();
-            AddRowLabel(content, "", 5, Color.white);
-            AddRowLabel(content, "  --- Stat Bonuses ---", 6, new Color(0.95f, 0.85f, 0.5f));
-            AddRowLabel(content, $"  VIG {stats.Vigor:+0;-0;0}  STR {stats.Strength:+0;-0;0}  HAR {stats.Harvest:+0;-0;0}", 7, Color.white);
-            AddRowLabel(content, $"  VER {stats.Verdance:+0;-0;0}  AGI {stats.Agility:+0;-0;0}  RES {stats.Resilience:+0;-0;0}", 8, Color.white);
+            AddRowLabel(content, "", row, Color.white); row++;
+            AddRowLabel(content, "  --- Stat Bonuses ---", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+            AddRowLabel(content, $"  VIG {stats.Vigor:+0;-0;0}  STR {stats.Strength:+0;-0;0}  HAR {stats.Harvest:+0;-0;0}", row, Color.white); row++;
+            AddRowLabel(content, $"  VER {stats.Verdance:+0;-0;0}  AGI {stats.Agility:+0;-0;0}  RES {stats.Resilience:+0;-0;0}", row, Color.white); row++;
 
-            SetContentHeight(content, 9);
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- Owned Weapons ----
+            AddRowLabel(content, "  --- Owned Weapons ---", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+
+            // Sort owned weapons by rarity (ascending), then by type
+            var sortedWeapons = new List<string>(_ownedWeapons);
+            sortedWeapons.Sort((a, b) =>
+            {
+                var wa = _weaponDefs[a];
+                var wb = _weaponDefs[b];
+                int rarityOrder = WeaponRaritySortOrder(wa.Rarity).CompareTo(WeaponRaritySortOrder(wb.Rarity));
+                if (rarityOrder != 0) return rarityOrder;
+                return ((int)wa.WeaponType).CompareTo((int)wb.WeaponType);
+            });
+
+            foreach (var wId in sortedWeapons)
+            {
+                var w = _weaponDefs[wId];
+                Color rc = WeaponRarityColor(w.Rarity);
+                bool isEquipped = wId == _equippedWeaponId;
+                string eqTag = isEquipped ? "  [EQUIPPED]" : "";
+                string rarTag = WeaponRarityName(w.Rarity);
+
+                AddRowLabel(content, $"  [{rarTag}] {w.WeaponName}  ({WeaponTypeName(w.WeaponType)})  DMG {w.BaseDamage:F0}  SPD {w.AttackSpeed:F1}{eqTag}", row, rc);
+
+                if (!isEquipped)
+                {
+                    string capturedId = wId;
+                    AddButton(content, "Equip", row, () =>
+                    {
+                        EquipWeapon(capturedId);
+                        CloseActiveScreen();
+                        ShowEquipment();
+                    });
+                }
+                row++;
+
+                // Show passive if present
+                if (!string.IsNullOrEmpty(w.UniquePassive))
+                {
+                    AddRowLabel(content, $"    {w.UniquePassive}", row, new Color(0.7f, 0.65f, 0.45f)); row++;
+                }
+            }
+
+            if (_ownedWeapons.Count == 0)
+            {
+                AddRowLabel(content, "  (no weapons owned)", row, Color.gray); row++;
+            }
+
+            SetContentHeight(content, row);
         }
+
+        private void EquipWeapon(string weaponId)
+        {
+            if (!_weaponDefs.TryGetValue(weaponId, out var weapon)) return;
+            _equippedWeaponId = weaponId;
+            _equipment.Equip(weaponId, EquipmentSlot.Weapon);
+            if (_sceneSetup != null)
+                _sceneSetup.SetActiveWeapon(weapon);
+            Debug.Log($"[Equipment] Equipped weapon: {weapon.WeaponName}");
+        }
+
+        private static string WeaponTypeName(WeaponType t) => t switch
+        {
+            WeaponType.Scythe => "Scythe",
+            WeaponType.HoeBlade => "Hoe-Blade",
+            WeaponType.SickleShield => "Sickle & Shield",
+            WeaponType.PitchforkSpear => "Pitchfork Spear",
+            WeaponType.SeedSling => "Seed Sling",
+            WeaponType.DruidStaff => "Druid Staff",
+            _ => t.ToString()
+        };
+
+        private static string WeaponRarityName(Rarity r) => r switch
+        {
+            Rarity.Common => "Common",
+            Rarity.Uncommon => "Uncommon",
+            Rarity.Rare => "Rare",
+            Rarity.Epic => "Epic",
+            Rarity.Legendary => "Legendary",
+            _ => r.ToString()
+        };
+
+        private static Color WeaponRarityColor(Rarity r) => r switch
+        {
+            Rarity.Common => new Color(0.7f, 0.7f, 0.7f),       // White/gray
+            Rarity.Uncommon => new Color(0.3f, 0.85f, 0.3f),    // Green
+            Rarity.Rare => new Color(0.3f, 0.5f, 1f),           // Blue
+            Rarity.Epic => new Color(0.7f, 0.3f, 0.9f),         // Purple
+            Rarity.Legendary => new Color(1f, 0.6f, 0.1f),      // Orange
+            _ => Color.white
+        };
+
+        private static int WeaponRaritySortOrder(Rarity r) => r switch
+        {
+            Rarity.Common => 0,
+            Rarity.Uncommon => 1,
+            Rarity.Rare => 2,
+            Rarity.Epic => 3,
+            Rarity.Legendary => 4,
+            _ => 5
+        };
 
         // ================================================================
         // SHOP SCREEN
@@ -898,6 +1265,8 @@ namespace SoR.Testing
                 {
                     if (_crafting.Craft(capturedRecipe))
                     {
+                        if (_weaponDefs.ContainsKey(capturedRecipe.OutputItemId))
+                            _ownedWeapons.Add(capturedRecipe.OutputItemId);
                         Debug.Log($"[Crafting] Crafted {capturedRecipe.RecipeName}");
                         CloseActiveScreen();
                         ShowCrafting(); // Refresh
@@ -1668,6 +2037,301 @@ namespace SoR.Testing
         }
 
         // ================================================================
+        // ADVENTURE GUILD SCREEN
+        // ================================================================
+
+        private void ShowGuild()
+        {
+            var panel = CreateScreenPanel("Adventure Guild");
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.88f));
+
+            // Tab buttons at top
+            string[] tabNames = { "Info", "Contracts", "Active", "Turn In" };
+            for (int i = 0; i < tabNames.Length; i++)
+            {
+                int tabIdx = i;
+                float tabWidth = 1f / tabNames.Length;
+                var tabGo = new GameObject("Tab_" + tabNames[i]);
+                tabGo.transform.SetParent(panel.transform, false);
+                var tabRt = tabGo.AddComponent<RectTransform>();
+                tabRt.anchorMin = new Vector2(tabWidth * i, 0.88f);
+                tabRt.anchorMax = new Vector2(tabWidth * (i + 1), 0.93f);
+                tabRt.offsetMin = new Vector2(2f, 0f);
+                tabRt.offsetMax = new Vector2(-2f, 0f);
+
+                bool isActive = _guildTab == i;
+                var tabImg = tabGo.AddComponent<Image>();
+                tabImg.color = isActive ? new Color(0.25f, 0.35f, 0.5f) : new Color(0.15f, 0.15f, 0.2f);
+
+                var tabBtn = tabGo.AddComponent<Button>();
+                tabBtn.targetGraphic = tabImg;
+                tabBtn.onClick.AddListener(() =>
+                {
+                    _guildTab = tabIdx;
+                    CloseActiveScreen();
+                    ShowGuild();
+                });
+
+                var tabTextGo = new GameObject("Text");
+                tabTextGo.transform.SetParent(tabGo.transform, false);
+                var tabText = tabTextGo.AddComponent<Text>();
+                tabText.text = tabNames[i];
+                tabText.font = _font;
+                tabText.fontSize = 15;
+                tabText.color = isActive ? Color.white : new Color(0.6f, 0.6f, 0.6f);
+                tabText.alignment = TextAnchor.MiddleCenter;
+                var ttRt = tabTextGo.GetComponent<RectTransform>();
+                ttRt.anchorMin = Vector2.zero;
+                ttRt.anchorMax = Vector2.one;
+                ttRt.offsetMin = Vector2.zero;
+                ttRt.offsetMax = Vector2.zero;
+            }
+
+            switch (_guildTab)
+            {
+                case 0: BuildGuildInfoTab(content); break;
+                case 1: BuildGuildContractsTab(content); break;
+                case 2: BuildGuildActiveTab(content); break;
+                case 3: BuildGuildTurnInTab(content); break;
+            }
+        }
+
+        private void BuildGuildInfoTab(Transform content)
+        {
+            int row = 0;
+            string rankName = GetGuildRankName();
+            Color rankColor = GetGuildRankColor();
+            int rankIdx = GetGuildRankIndex();
+
+            AddRowLabel(content, $"  Guild Rank: {rankName}", row, rankColor);
+            row++;
+
+            // Progress bar to next rank
+            int nextThreshold = rankIdx < GuildRankThresholds.Length - 1
+                ? GuildRankThresholds[rankIdx + 1]
+                : GuildRankThresholds[rankIdx];
+            int currentThreshold = GuildRankThresholds[rankIdx];
+            float progress = rankIdx >= GuildRankThresholds.Length - 1
+                ? 1f
+                : (float)(_guildReputation - currentThreshold) / (nextThreshold - currentThreshold);
+
+            string nextRankLabel = rankIdx < GuildRankNames.Length - 1
+                ? GuildRankNames[rankIdx + 1]
+                : "MAX";
+            AddRowLabel(content, $"  Reputation: {_guildReputation} / {nextThreshold}  (next: {nextRankLabel})", row, Color.white);
+            row++;
+
+            // Visual progress bar
+            string barFilled = new string('|', Mathf.Clamp((int)(progress * 20), 0, 20));
+            string barEmpty = new string('.', 20 - barFilled.Length);
+            AddRowLabel(content, $"  [{barFilled}{barEmpty}]  {(progress * 100f):F0}%", row, rankColor);
+            row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+            AddRowLabel(content, $"  Contracts Completed: {_guildContractsCompleted}", row, Color.white);
+            row++;
+            AddRowLabel(content, $"  Guild Tokens: {_guildTokens}", row, new Color(0.5f, 1f, 0.5f));
+            row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+            AddRowLabel(content, "  --- Rank Thresholds ---", row, new Color(0.95f, 0.85f, 0.5f));
+            row++;
+
+            for (int i = 0; i < GuildRankNames.Length; i++)
+            {
+                bool isCurrent = i == rankIdx;
+                Color c = isCurrent ? GetGuildRankColor() : new Color(0.5f, 0.5f, 0.5f);
+                string marker = isCurrent ? " <<" : "";
+                AddRowLabel(content, $"    {GuildRankNames[i]}: {GuildRankThresholds[i]} rep{marker}", row, c);
+                row++;
+            }
+
+            SetContentHeight(content, row);
+        }
+
+        private void BuildGuildContractsTab(Transform content)
+        {
+            int row = 0;
+            int rankIdx = GetGuildRankIndex();
+
+            AddRowLabel(content, "  --- Available Guild Contracts ---", row, new Color(0.95f, 0.85f, 0.5f));
+            row++;
+
+            var activeQuests = _questManager.GetActiveQuests();
+            var completedIds = _questManager.GetCompletedQuestIds();
+            var uncollected = _questManager.GetCompletedUncollectedQuests();
+
+            foreach (var quest in _testQuests)
+            {
+                if (quest.Type != QuestType.GuildContract) continue;
+                if (activeQuests.ContainsKey(quest.QuestId) || completedIds.Contains(quest.QuestId)
+                    || uncollected.ContainsKey(quest.QuestId)) continue;
+
+                if (!_guildContractMeta.TryGetValue(quest.QuestId, out var meta))
+                    continue;
+
+                bool locked = rankIdx < meta.RequiredRank;
+                string rankReq = GuildRankNames[Mathf.Clamp(meta.RequiredRank, 0, GuildRankNames.Length - 1)];
+
+                if (locked)
+                {
+                    AddRowLabel(content, $"  [Locked] {quest.QuestName}  (Requires: {rankReq})", row, new Color(0.4f, 0.4f, 0.4f));
+                    row++;
+                }
+                else
+                {
+                    AddRowLabel(content, $"  {quest.QuestName}  (+{meta.ReputationReward} rep)", row, new Color(0.5f, 1f, 0.5f));
+
+                    var capturedQuest = quest;
+                    AddButton(content, "Accept", row, () =>
+                    {
+                        _questManager.AcceptQuest(capturedQuest);
+                        CloseActiveScreen();
+                        ShowGuild();
+                    });
+                    row++;
+
+                    // Show objectives
+                    foreach (var obj in quest.Objectives)
+                    {
+                        AddRowLabel(content, $"    - {obj.ObjectiveDescription} ({obj.RequiredCount})", row, new Color(0.7f, 0.7f, 0.7f));
+                        row++;
+                    }
+
+                    // Show rewards
+                    foreach (var reward in quest.Rewards)
+                    {
+                        string rewardText = "";
+                        if (!string.IsNullOrEmpty(reward.ItemId))
+                            rewardText += $"{FormatItemName(reward.ItemId)} x{reward.Quantity}  ";
+                        if (reward.Gold > 0) rewardText += $"{reward.Gold} Gold  ";
+                        AddRowLabel(content, $"    Reward: {rewardText.Trim()}", row, new Color(0.7f, 0.7f, 0.5f));
+                        row++;
+                    }
+                }
+            }
+
+            SetContentHeight(content, row);
+        }
+
+        private void BuildGuildActiveTab(Transform content)
+        {
+            int row = 0;
+            AddRowLabel(content, "  --- Active Guild Contracts ---", row, new Color(0.95f, 0.85f, 0.5f));
+            row++;
+
+            var activeQuests = _questManager.GetActiveQuests();
+            bool anyFound = false;
+
+            foreach (var kvp in activeQuests)
+            {
+                var state = kvp.Value;
+                var def = state.Definition;
+                if (def.Type != QuestType.GuildContract) continue;
+                anyFound = true;
+
+                AddRowLabel(content, $"  {def.QuestName}", row, new Color(0.5f, 1f, 0.5f));
+
+                var capturedId = def.QuestId;
+                AddButton(content, "Abandon", row, () =>
+                {
+                    _questManager.AbandonQuest(capturedId);
+                    CloseActiveScreen();
+                    ShowGuild();
+                });
+                row++;
+
+                for (int i = 0; i < def.Objectives.Count; i++)
+                {
+                    var obj = def.Objectives[i];
+                    int progress = state.ObjectiveProgress[i];
+                    bool done = progress >= obj.RequiredCount;
+                    string check = done ? "[X]" : "[ ]";
+                    Color objColor = done ? new Color(0.5f, 1f, 0.5f) : Color.white;
+
+                    // Progress bar
+                    float pct = (float)progress / obj.RequiredCount;
+                    int filled = Mathf.Clamp((int)(pct * 10), 0, 10);
+                    string bar = new string('|', filled) + new string('.', 10 - filled);
+
+                    AddRowLabel(content, $"    {check} {obj.ObjectiveDescription}  [{bar}] {progress}/{obj.RequiredCount}", row, objColor);
+                    row++;
+                }
+
+                AddRowLabel(content, "", row, Color.white);
+                row++;
+            }
+
+            if (!anyFound)
+            {
+                AddRowLabel(content, "    (no active guild contracts)", row, Color.gray);
+                row++;
+            }
+
+            SetContentHeight(content, row);
+        }
+
+        private void BuildGuildTurnInTab(Transform content)
+        {
+            int row = 0;
+            AddRowLabel(content, "  --- Completed Guild Contracts ---", row, new Color(0.95f, 0.85f, 0.5f));
+            row++;
+
+            var uncollected = _questManager.GetCompletedUncollectedQuests();
+            bool anyFound = false;
+
+            foreach (var kvp in uncollected)
+            {
+                var def = kvp.Value.Definition;
+                if (def.Type != QuestType.GuildContract) continue;
+                anyFound = true;
+
+                _guildContractMeta.TryGetValue(def.QuestId, out var meta);
+
+                AddRowLabel(content, $"  {def.QuestName}", row, new Color(0.4f, 0.9f, 0.4f));
+
+                var capturedId = def.QuestId;
+                int capturedRep = meta.ReputationReward;
+                AddButton(content, "Collect", row, () =>
+                {
+                    _questManager.CollectGuildQuestRewards(capturedId);
+                    _guildReputation += capturedRep;
+                    _guildTokens += capturedRep / 2;
+                    _guildContractsCompleted++;
+                    Debug.Log($"[Guild] Collected rewards for {capturedId}: +{capturedRep} rep, +{capturedRep / 2} tokens");
+                    CloseActiveScreen();
+                    ShowGuild();
+                });
+                row++;
+
+                // Show rewards preview
+                foreach (var reward in def.Rewards)
+                {
+                    string rewardText = "";
+                    if (!string.IsNullOrEmpty(reward.ItemId))
+                        rewardText += $"{FormatItemName(reward.ItemId)} x{reward.Quantity}  ";
+                    if (reward.Gold > 0) rewardText += $"{reward.Gold} Gold  ";
+                    AddRowLabel(content, $"    Reward: {rewardText.Trim()}", row, new Color(0.7f, 0.7f, 0.5f));
+                    row++;
+                }
+
+                AddRowLabel(content, $"    +{meta.ReputationReward} Reputation  +{meta.ReputationReward / 2} Guild Tokens", row, new Color(0.5f, 1f, 0.8f));
+                row++;
+
+                AddRowLabel(content, "", row, Color.white);
+                row++;
+            }
+
+            if (!anyFound)
+            {
+                AddRowLabel(content, "    (no contracts ready for turn-in)", row, Color.gray);
+                row++;
+            }
+
+            SetContentHeight(content, row);
+        }
+
+        // ================================================================
         // QUEST LOG SCREEN
         // ================================================================
 
@@ -2007,6 +2671,21 @@ namespace SoR.Testing
                 CloseActiveScreen(); ShowCheatMenu();
             }); row++;
 
+            AddRowLabel(content, $"  Guild Reputation: {_guildReputation}  ({GetGuildRankName()})", row, cheatColor);
+            AddCheatValueButtons(content, row, new[] { 100f, 300f, 600f, 1500f }, v =>
+            {
+                _guildReputation = (int)v;
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Add 100 Guild Reputation", row, cheatColor);
+            AddButton(content, "+100 GR", row, () =>
+            {
+                _guildReputation += 100;
+                Debug.Log($"[Cheat] Added 100 guild reputation (now {_guildReputation})");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
             AddRowLabel(content, $"  Accord Essence: {_accordEssence}", row, cheatColor);
             AddCheatValueButtons(content, row, new[] { 100f, 500f, 1000f, 9999f }, v =>
             {
@@ -2066,6 +2745,56 @@ namespace SoR.Testing
                     CloseActiveScreen(); ShowCheatMenu();
                 }); row++;
             }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- WEAPONS ----
+            AddRowLabel(content, "  --- Weapons ---", row, headerColor); row++;
+
+            AddRowLabel(content, "  Unlock all Common & Uncommon", row, cheatColor);
+            AddButton(content, "Unlock", row, () =>
+            {
+                foreach (var kvp in _weaponDefs)
+                {
+                    if (kvp.Value.Rarity == Rarity.Common || kvp.Value.Rarity == Rarity.Uncommon)
+                        _ownedWeapons.Add(kvp.Key);
+                }
+                Debug.Log("[Cheat] Unlocked all Common & Uncommon weapons");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Unlock all Rare & Epic", row, cheatColor);
+            AddButton(content, "Unlock", row, () =>
+            {
+                foreach (var kvp in _weaponDefs)
+                {
+                    if (kvp.Value.Rarity == Rarity.Rare || kvp.Value.Rarity == Rarity.Epic)
+                        _ownedWeapons.Add(kvp.Key);
+                }
+                Debug.Log("[Cheat] Unlocked all Rare & Epic weapons");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Unlock all Legendary weapons", row, new Color(1f, 0.6f, 0.1f));
+            AddButton(content, "Unlock", row, () =>
+            {
+                foreach (var kvp in _weaponDefs)
+                {
+                    if (kvp.Value.Rarity == Rarity.Legendary)
+                        _ownedWeapons.Add(kvp.Key);
+                }
+                Debug.Log("[Cheat] Unlocked all Legendary weapons");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Unlock ALL weapons", row, new Color(1f, 0.85f, 0.3f));
+            AddButton(content, "All", row, () =>
+            {
+                foreach (var kvp in _weaponDefs)
+                    _ownedWeapons.Add(kvp.Key);
+                Debug.Log("[Cheat] Unlocked all weapons");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
 
             AddRowLabel(content, "", row, Color.white); row++;
 
@@ -2333,6 +3062,26 @@ namespace SoR.Testing
                         _sceneSetup.PlayerTransform.position = townCenter;
                     }
                     Debug.Log("[Cheat] Teleported to Town Center");
+                    CloseActiveScreen(); ShowCheatMenu();
+                }); row++;
+
+                // Teleport to Guild Hall
+                AddRowLabel(content, "  Teleport to Guild", row, cheatColor);
+                AddButton(content, "Warp", row, () =>
+                {
+                    Vector3 guildPos = new Vector3(2f, 0f, -2f);
+                    var cc = _sceneSetup.PlayerTransform.GetComponent<CharacterController>();
+                    if (cc != null)
+                    {
+                        cc.enabled = false;
+                        _sceneSetup.PlayerTransform.position = guildPos;
+                        cc.enabled = true;
+                    }
+                    else
+                    {
+                        _sceneSetup.PlayerTransform.position = guildPos;
+                    }
+                    Debug.Log("[Cheat] Teleported to Guild Hall");
                     CloseActiveScreen(); ShowCheatMenu();
                 }); row++;
 
@@ -2697,7 +3446,9 @@ namespace SoR.Testing
         private static Color RarityToColor(Rarity r) => r switch
         {
             Rarity.Common => new Color(0.7f, 0.7f, 0.7f),
+            Rarity.Uncommon => new Color(0.3f, 0.85f, 0.3f),
             Rarity.Rare => new Color(0.5f, 0.7f, 1f),
+            Rarity.Epic => new Color(0.7f, 0.3f, 0.9f),
             Rarity.Legendary => new Color(1f, 0.85f, 0.3f),
             Rarity.Mythic => new Color(1f, 0.5f, 1f),
             _ => Color.white
@@ -2705,6 +3456,9 @@ namespace SoR.Testing
 
         private Color GetRarityColor(string itemId)
         {
+            // Check if it's a weapon with known rarity
+            if (_weaponDefs.TryGetValue(itemId, out var weapon))
+                return WeaponRarityColor(weapon.Rarity);
             // Simple heuristic based on known items
             if (itemId.Contains("moonstone") || itemId.Contains("ancient"))
                 return RarityToColor(Rarity.Legendary);
@@ -2849,6 +3603,53 @@ namespace SoR.Testing
             foreach (var (itemId, qty) in ingredients)
                 recipe.Ingredients.Add(new RecipeIngredient { ItemId = itemId, Quantity = qty });
             return recipe;
+        }
+
+        // ================================================================
+        // Guild rank helpers
+        // ================================================================
+
+        private static readonly string[] GuildRankNames = { "Initiate", "Bronze", "Silver", "Gold", "Platinum", "Legendary" };
+        private static readonly int[] GuildRankThresholds = { 0, 100, 300, 600, 1000, 1500 };
+
+        private string GetGuildRankName()
+        {
+            int idx = GetGuildRankIndex();
+            return GuildRankNames[idx];
+        }
+
+        private int GetGuildRankIndex()
+        {
+            for (int i = GuildRankThresholds.Length - 1; i >= 0; i--)
+            {
+                if (_guildReputation >= GuildRankThresholds[i])
+                    return i;
+            }
+            return 0;
+        }
+
+        private Color GetGuildRankColor()
+        {
+            return GetGuildRankIndex() switch
+            {
+                0 => new Color(0.7f, 0.7f, 0.7f),      // Initiate — gray
+                1 => new Color(0.8f, 0.55f, 0.2f),      // Bronze
+                2 => new Color(0.75f, 0.75f, 0.8f),     // Silver
+                3 => new Color(1f, 0.85f, 0.2f),        // Gold
+                4 => new Color(0.6f, 0.9f, 1f),         // Platinum
+                5 => new Color(1f, 0.5f, 0.2f),         // Legendary
+                _ => Color.white
+            };
+        }
+
+        private QuestDefinitionSO CreateGuildContract(string name, string id, string description,
+            int requiredRank, int reputationReward,
+            (string desc, ObjectiveType objType, string targetId, int count)[] objectives,
+            (string itemId, int qty, int xp, int gold)[] rewards)
+        {
+            var quest = CreateQuest(name, id, QuestType.GuildContract, description, objectives, rewards);
+            _guildContractMeta[id] = (requiredRank, reputationReward);
+            return quest;
         }
 
         private QuestDefinitionSO CreateQuest(string name, string id, QuestType type, string description,

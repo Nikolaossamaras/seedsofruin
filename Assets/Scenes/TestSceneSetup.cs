@@ -41,6 +41,7 @@ namespace SoR.Testing
         public float PlayerMaxVerdance { get => _playerMaxVerdance; set { _playerMaxVerdance = value; _playerVerdance = Mathf.Min(_playerVerdance, value); } }
         public PlayerStatsSO PlayerStats => _playerStats;
         public WeaponDefinitionSO TestWeapon => _testWeapon;
+        public void SetActiveWeapon(WeaponDefinitionSO weapon) { if (weapon != null) _testWeapon = weapon; }
         public bool GodMode { get; set; }
         public bool OneHitKill { get; set; }
         public Transform PlayerTransform => _player != null ? _player.transform : null;
@@ -317,6 +318,7 @@ namespace SoR.Testing
         private void CreateTown()
         {
             CreateTownDecor();
+            CreateGuildHall();
 
             // Stalls for each NPC — position is the NPC's position, stall is built behind them
             // Row 1 (north): Silas (left, facing right), Maren (right, facing left)
@@ -336,6 +338,76 @@ namespace SoR.Testing
                 new Color(0.2f, 0.55f, 0.5f), new Color(0.3f, 0.65f, 0.6f), "Enna_Stall");
             CreateTownStall(new Vector3(8f, 0f, -22f), false,
                 new Color(0.35f, 0.15f, 0.45f), new Color(0.45f, 0.2f, 0.55f), "Whisperer_Stall");
+        }
+
+        private void CreateGuildHall()
+        {
+            var parent = new GameObject("GuildHall");
+            parent.transform.position = new Vector3(0f, 0f, -2f);
+
+            // Back wall (north)
+            var backWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            backWall.name = "BackWall";
+            backWall.transform.SetParent(parent.transform, false);
+            backWall.transform.localPosition = new Vector3(0f, 2f, 2.5f);
+            backWall.transform.localScale = new Vector3(8f, 4f, 0.4f);
+            backWall.GetComponent<Renderer>().material = CreateMaterial(new Color(0.45f, 0.45f, 0.48f)); // stone gray
+
+            // Left wall
+            var leftWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            leftWall.name = "LeftWall";
+            leftWall.transform.SetParent(parent.transform, false);
+            leftWall.transform.localPosition = new Vector3(-3.8f, 2f, 0.5f);
+            leftWall.transform.localScale = new Vector3(0.4f, 4f, 4.5f);
+            leftWall.GetComponent<Renderer>().material = CreateMaterial(new Color(0.45f, 0.45f, 0.48f));
+
+            // Right wall
+            var rightWall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            rightWall.name = "RightWall";
+            rightWall.transform.SetParent(parent.transform, false);
+            rightWall.transform.localPosition = new Vector3(3.8f, 2f, 0.5f);
+            rightWall.transform.localScale = new Vector3(0.4f, 4f, 4.5f);
+            rightWall.GetComponent<Renderer>().material = CreateMaterial(new Color(0.45f, 0.45f, 0.48f));
+
+            // Roof
+            var roof = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            roof.name = "Roof";
+            roof.transform.SetParent(parent.transform, false);
+            roof.transform.localPosition = new Vector3(0f, 4.2f, 0.5f);
+            roof.transform.localScale = new Vector3(9f, 0.3f, 5.5f);
+            roof.GetComponent<Renderer>().material = CreateMaterial(new Color(0.4f, 0.25f, 0.12f)); // brown
+
+            // Floor
+            var floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            floor.name = "Floor";
+            floor.transform.SetParent(parent.transform, false);
+            floor.transform.localPosition = new Vector3(0f, 0.05f, 0.5f);
+            floor.transform.localScale = new Vector3(7.6f, 0.1f, 4.5f);
+            floor.GetComponent<Renderer>().material = CreateMaterial(new Color(0.3f, 0.2f, 0.1f)); // dark wood
+
+            // Entrance pillars
+            var pillarMat = CreateMaterial(new Color(0.5f, 0.5f, 0.52f));
+            var leftPillar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            leftPillar.name = "LeftPillar";
+            leftPillar.transform.SetParent(parent.transform, false);
+            leftPillar.transform.localPosition = new Vector3(-2.5f, 2f, -1.5f);
+            leftPillar.transform.localScale = new Vector3(0.5f, 4f, 0.5f);
+            leftPillar.GetComponent<Renderer>().material = pillarMat;
+
+            var rightPillar = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            rightPillar.name = "RightPillar";
+            rightPillar.transform.SetParent(parent.transform, false);
+            rightPillar.transform.localPosition = new Vector3(2.5f, 2f, -1.5f);
+            rightPillar.transform.localScale = new Vector3(0.5f, 4f, 0.5f);
+            rightPillar.GetComponent<Renderer>().material = pillarMat;
+
+            // Banner/sign above entrance
+            var banner = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            banner.name = "GuildBanner";
+            banner.transform.SetParent(parent.transform, false);
+            banner.transform.localPosition = new Vector3(0f, 3.5f, -1.5f);
+            banner.transform.localScale = new Vector3(2f, 1f, 0.1f);
+            banner.GetComponent<Renderer>().material = CreateMaterial(new Color(0.85f, 0.7f, 0.2f)); // gold
         }
 
         /// <summary>
@@ -380,11 +452,11 @@ namespace SoR.Testing
         /// </summary>
         private void CreateTownDecor()
         {
-            // Town square ground tile — lighter cobblestone color
+            // Town square ground tile — lighter cobblestone color (extended north to cover guild hall)
             var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
             ground.name = "TownSquareGround";
-            ground.transform.position = new Vector3(0f, 0.01f, -14f);
-            ground.transform.localScale = new Vector3(2.4f, 1f, 2f); // 24x20 units
+            ground.transform.position = new Vector3(0f, 0.01f, -12f);
+            ground.transform.localScale = new Vector3(2.4f, 1f, 2.4f); // 24x24 units (Z=0 to Z=-24)
             ground.GetComponent<Renderer>().material = CreateMaterial(new Color(0.55f, 0.5f, 0.4f));
 
             // Central well/fountain
@@ -401,10 +473,12 @@ namespace SoR.Testing
             rim.transform.localScale = new Vector3(1.7f, 0.1f, 1.7f);
             rim.GetComponent<Renderer>().material = CreateMaterial(new Color(0.4f, 0.4f, 0.42f));
 
-            // Corner posts at the 4 corners of the market area
+            // Corner posts at the 6 corners of the market area (including north for guild hall)
             var postColor = CreateMaterial(new Color(0.45f, 0.35f, 0.25f));
             Vector3[] postPositions =
             {
+                new Vector3(-11f, 0.75f, 1f),   // north-left
+                new Vector3(11f, 0.75f, 1f),    // north-right
                 new Vector3(-11f, 0.75f, -4f),
                 new Vector3(11f, 0.75f, -4f),
                 new Vector3(-11f, 0.75f, -25f),
@@ -426,6 +500,9 @@ namespace SoR.Testing
 
         private void CreateNPCs()
         {
+            // Guildmaster inside the Guild Hall
+            SpawnNPC("Guildmaster Aldric",  "adventure_guild",     "Guildmaster",          new Vector3(0f, 0f, 0f),     new Color(0.7f, 0.55f, 0.2f));
+
             // All NPCs now in Greenreach Valley town market
             SpawnNPC("Silas",               "seed_merchant",       "Seed Merchant",        new Vector3(-6f, 0f, -7f),   new Color(0.3f, 0.75f, 0.3f));
             SpawnNPC("Maren",               "general_store",       "General Store",        new Vector3(6f, 0f, -7f),    new Color(0.6f, 0.9f, 0.5f));
