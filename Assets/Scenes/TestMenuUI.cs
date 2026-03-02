@@ -2368,8 +2368,8 @@ namespace SoR.Testing
                     new Vector3(-12f, 0f, -6f),
                     new Vector3(0f, 0f, -15f),
                     new Vector3(-5f, 0f, -20f),
-                    new Vector3(50f, -1.5f, -48f),
-                    new Vector3(48f, 3.5f, 48f),
+                    new Vector3(50f, 0f, -48f),
+                    new Vector3(48f, 0f, 48f),
                 };
 
                 for (int i = 0; i < npcNames.Length; i++)
