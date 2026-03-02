@@ -540,42 +540,79 @@ namespace SoR.Testing
             behavior.AttackCooldown = tier == Rarity.Rare ? 1.2f : 1.5f;
             behavior.OnAttackHit += OnEnemyAttackPlayer;
 
-            // World-space health bar
-            var (fill, canvasTransform) = CreateEnemyHealthBar(go.transform);
+            // World-space nametag + health bar
+            var (fill, canvasTransform) = CreateEnemyHealthBar(go.transform, enemyName, level, tier, finalColor, visualScale);
 
             return new EnemyEntry { AI = ai, HealthFill = fill, HealthBarCanvas = canvasTransform };
         }
 
-        private (Image fill, Transform canvasTransform) CreateEnemyHealthBar(Transform parent)
+        private (Image fill, Transform canvasTransform) CreateEnemyHealthBar(
+            Transform parent, string enemyName, int level, Rarity tier, Color enemyColor, float visualScale)
         {
+            float barY = 2.2f * visualScale;
+
             var canvasGo = new GameObject("HealthBarCanvas");
             canvasGo.transform.SetParent(parent, false);
-            canvasGo.transform.localPosition = new Vector3(0f, 2.2f, 0f);
+            canvasGo.transform.localPosition = new Vector3(0f, barY, 0f);
 
             var canvas = canvasGo.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
             canvasGo.AddComponent<CanvasScaler>();
 
             var rt = canvasGo.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(120f, 15f);
+            rt.sizeDelta = new Vector2(160f, 38f); // taller to fit name + bar
             rt.localScale = Vector3.one * 0.01f;
 
-            // Background
+            // --- Nametag (top half) ---
+            var nameGo = new GameObject("Name");
+            nameGo.transform.SetParent(canvasGo.transform, false);
+            var nameText = nameGo.AddComponent<Text>();
+
+            // Color name by tier
+            Color nameColor = tier switch
+            {
+                Rarity.Rare => new Color(1f, 0.85f, 0.3f),      // gold for elites
+                Rarity.Legendary => new Color(1f, 0.5f, 0.2f),   // orange
+                Rarity.Mythic => new Color(1f, 0.4f, 1f),        // pink-purple
+                _ => Color.white,                                  // common = white
+            };
+
+            nameText.text = $"{enemyName}  Lv{level}";
+            nameText.font = _font;
+            nameText.fontSize = 13;
+            nameText.color = nameColor;
+            nameText.alignment = TextAnchor.MiddleCenter;
+            nameText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            var nameRt = nameGo.GetComponent<RectTransform>();
+            nameRt.anchorMin = new Vector2(0f, 0.45f);
+            nameRt.anchorMax = Vector2.one;
+            nameRt.offsetMin = Vector2.zero;
+            nameRt.offsetMax = Vector2.zero;
+
+            // --- Health bar (bottom half) ---
+            // Bar background
             var bgGo = new GameObject("Bg");
             bgGo.transform.SetParent(canvasGo.transform, false);
             var bgImg = bgGo.AddComponent<Image>();
-            bgImg.color = new Color(0.15f, 0.15f, 0.15f, 0.9f);
+            bgImg.color = new Color(0.12f, 0.12f, 0.12f, 0.9f);
             var bgRt = bgGo.GetComponent<RectTransform>();
             bgRt.anchorMin = Vector2.zero;
-            bgRt.anchorMax = Vector2.one;
-            bgRt.offsetMin = Vector2.zero;
-            bgRt.offsetMax = Vector2.zero;
+            bgRt.anchorMax = new Vector2(1f, 0.4f);
+            bgRt.offsetMin = new Vector2(8f, 0f);
+            bgRt.offsetMax = new Vector2(-8f, 0f);
 
-            // Fill
+            // Bar fill
             var fillGo = new GameObject("Fill");
-            fillGo.transform.SetParent(canvasGo.transform, false);
+            fillGo.transform.SetParent(bgGo.transform, false);
             var fillImg = fillGo.AddComponent<Image>();
-            fillImg.color = new Color(0.9f, 0.15f, 0.15f, 1f);
+            // Tint health bar color by tier
+            fillImg.color = tier switch
+            {
+                Rarity.Rare => new Color(1f, 0.6f, 0.15f, 1f),   // orange for elites
+                Rarity.Legendary => new Color(0.9f, 0.3f, 0.1f),
+                Rarity.Mythic => new Color(0.8f, 0.15f, 0.8f),
+                _ => new Color(0.85f, 0.15f, 0.15f, 1f),          // red for common
+            };
             var fillRt = fillGo.GetComponent<RectTransform>();
             fillRt.anchorMin = Vector2.zero;
             fillRt.anchorMax = Vector2.one; // anchorMax.x driven in UpdateEnemyHealthBars
