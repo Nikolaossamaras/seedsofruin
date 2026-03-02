@@ -43,6 +43,7 @@ namespace SoR.Testing
         public WeaponDefinitionSO TestWeapon => _testWeapon;
         public bool GodMode { get; set; }
         public bool OneHitKill { get; set; }
+        public Transform PlayerTransform => _player != null ? _player.transform : null;
 
         // ---- enemies ----
         private readonly List<EnemyEntry> _enemies = new();
@@ -126,6 +127,17 @@ namespace SoR.Testing
             public TestCompanionBehavior Behavior;
         }
 
+        // ---- NPCs (shop keepers) ----
+        public struct NpcEntry
+        {
+            public string Name;
+            public string ShopId;
+            public string ShopRole;
+            public Transform Root;
+            public Transform NametagCanvas;
+        }
+        private readonly List<NpcEntry> _npcList = new();
+
         // ---- party passive buffs ----
         private float _partyDamageBonus = 1f;     // multiplier (1.0 = no bonus)
         private float _partyCooldownReduction = 0f; // seconds
@@ -148,6 +160,7 @@ namespace SoR.Testing
             CreateRamps();
             CreatePlayer();
             CreateEnemies();
+            CreateNPCs();
             CreateCompanionWeapon();
             SetupCamera();
             CreateHUD();
@@ -177,6 +190,7 @@ namespace SoR.Testing
             UpdateCamera();
             UpdateHUD();
             UpdateEnemyHealthBars();
+            UpdateNPCNametags();
             CheckPlayerAttackHits();
         }
 
@@ -373,6 +387,140 @@ namespace SoR.Testing
             }
             _currentZoneName = "Wilderness";
             return 0f;
+        }
+
+        // ================================================================
+        // NPCs (shop keepers)
+        // ================================================================
+
+        private void CreateNPCs()
+        {
+            // Greenreach Valley (height 0)
+            SpawnNPC("Maren",               "general_store",       "General Store",        new Vector3(8f, 0f, -8f),    new Color(0.6f, 0.9f, 0.5f));
+            SpawnNPC("Bram",                "brams_forge",         "Blacksmith",           new Vector3(-12f, 0f, -6f),  new Color(0.8f, 0.5f, 0.25f));
+            SpawnNPC("Silas",               "seed_merchant",       "Seed Merchant",        new Vector3(0f, 0f, -15f),   new Color(0.3f, 0.75f, 0.3f));
+            SpawnNPC("Quartermaster Voss",  "guild_quartermaster", "Guild Quartermaster",  new Vector3(-5f, 0f, -20f),  new Color(0.45f, 0.6f, 0.8f));
+            // Gloomtide Marshes (height -1.5)
+            SpawnNPC("Druid Enna",          "wandering_druid",     "Wandering Druid",      new Vector3(50f, -1.5f, -48f), new Color(0.3f, 0.7f, 0.65f));
+            // The Withered Heart (height 3.5)
+            SpawnNPC("The Whisperer",       "black_market",        "Black Market",         new Vector3(48f, 3.5f, 48f), new Color(0.45f, 0.2f, 0.55f));
+        }
+
+        private void SpawnNPC(string npcName, string shopId, string shopRole, Vector3 position, Color color)
+        {
+            var go = new GameObject($"NPC_{npcName}");
+            go.transform.position = position;
+
+            // Visual — capsule (distinct from cube enemies)
+            var visual = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            visual.name = "NPCModel";
+            visual.transform.SetParent(go.transform, false);
+            visual.transform.localPosition = new Vector3(0f, 1f, 0f);
+            visual.transform.localScale = new Vector3(1f, 1f, 1f); // 2 units tall (capsule default height = 2)
+            Object.Destroy(visual.GetComponent<CapsuleCollider>());
+            visual.GetComponent<Renderer>().material = CreateMaterial(color);
+
+            // Collider for interaction detection
+            var col = go.AddComponent<BoxCollider>();
+            col.center = new Vector3(0f, 1f, 0f);
+            col.size = new Vector3(1.2f, 2.2f, 1.2f);
+            col.isTrigger = true;
+
+            // Nametag
+            var nametagCanvas = CreateNPCNametag(go.transform, npcName, shopRole, color);
+
+            _npcList.Add(new NpcEntry
+            {
+                Name = npcName,
+                ShopId = shopId,
+                ShopRole = shopRole,
+                Root = go.transform,
+                NametagCanvas = nametagCanvas
+            });
+        }
+
+        private Transform CreateNPCNametag(Transform parent, string npcName, string shopRole, Color color)
+        {
+            float barY = 2.8f;
+
+            var canvasGo = new GameObject("NPCNametag");
+            canvasGo.transform.SetParent(parent, false);
+            canvasGo.transform.localPosition = new Vector3(0f, barY, 0f);
+
+            var canvas = canvasGo.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvasGo.AddComponent<CanvasScaler>();
+
+            var rt = canvasGo.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(200f, 45f);
+            rt.localScale = Vector3.one * 0.01f;
+
+            // Name text (top)
+            var nameGo = new GameObject("Name");
+            nameGo.transform.SetParent(canvasGo.transform, false);
+            var nameText = nameGo.AddComponent<Text>();
+            nameText.text = npcName;
+            nameText.font = _font;
+            nameText.fontSize = 15;
+            nameText.color = Color.white;
+            nameText.alignment = TextAnchor.MiddleCenter;
+            nameText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            var nameRt = nameGo.GetComponent<RectTransform>();
+            nameRt.anchorMin = new Vector2(0f, 0.5f);
+            nameRt.anchorMax = Vector2.one;
+            nameRt.offsetMin = Vector2.zero;
+            nameRt.offsetMax = Vector2.zero;
+
+            // Role text (bottom)
+            var roleGo = new GameObject("Role");
+            roleGo.transform.SetParent(canvasGo.transform, false);
+            var roleText = roleGo.AddComponent<Text>();
+            roleText.text = $"[{shopRole}]";
+            roleText.font = _font;
+            roleText.fontSize = 12;
+            roleText.color = new Color(1f, 0.85f, 0.3f);
+            roleText.alignment = TextAnchor.MiddleCenter;
+            roleText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            var roleRt = roleGo.GetComponent<RectTransform>();
+            roleRt.anchorMin = Vector2.zero;
+            roleRt.anchorMax = new Vector2(1f, 0.5f);
+            roleRt.offsetMin = Vector2.zero;
+            roleRt.offsetMax = Vector2.zero;
+
+            return canvasGo.transform;
+        }
+
+        private void UpdateNPCNametags()
+        {
+            if (_mainCamera == null) return;
+            foreach (var npc in _npcList)
+            {
+                if (npc.NametagCanvas != null)
+                    npc.NametagCanvas.forward = _mainCamera.transform.forward;
+            }
+        }
+
+        /// <summary>
+        /// Returns the nearest NPC within maxRange of the player, or null if none.
+        /// </summary>
+        public NpcEntry? GetNearestNPC(float maxRange)
+        {
+            if (_player == null) return null;
+            Vector3 playerPos = _player.transform.position;
+            NpcEntry? nearest = null;
+            float nearestDist = float.MaxValue;
+
+            foreach (var npc in _npcList)
+            {
+                if (npc.Root == null) continue;
+                float dist = Vector3.Distance(playerPos, npc.Root.position);
+                if (dist <= maxRange && dist < nearestDist)
+                {
+                    nearestDist = dist;
+                    nearest = npc;
+                }
+            }
+            return nearest;
         }
 
         private void CreatePlayer()

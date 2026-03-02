@@ -20,6 +20,7 @@ namespace SoR.Gameplay
             _controller.InputDirection = Vector3.zero;
             _controller.AttackInputPressed = false;
             _controller.DodgeInputPressed = false;
+            _controller.JumpInputPressed = false;
             _controller.SkillInputIndex = -1;
 
             Debug.Log("[PlayerDeathState] Player has died.");

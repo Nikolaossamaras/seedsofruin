@@ -49,6 +49,7 @@ namespace SoR.Gameplay
         public void Exit()
         {
             _controller.IsInvincible = false;
+            _controller.StartDodgeCooldown();
         }
     }
 }

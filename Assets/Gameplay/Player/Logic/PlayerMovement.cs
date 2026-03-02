@@ -17,6 +17,7 @@ namespace SoR.Gameplay
         public float DodgeSpeed => _dodgeSpeed;
         public float DodgeDistance => _dodgeDistance;
         public bool IsGrounded => _characterController != null && _characterController.isGrounded;
+        public CharacterController GetCharacterController() => _characterController;
 
         public void Initialize(float moveSpeed, float dodgeSpeed, float dodgeDistance)
         {

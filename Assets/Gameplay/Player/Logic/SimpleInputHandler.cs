@@ -36,6 +36,10 @@ namespace SoR.Gameplay
             if (Input.GetKeyDown(KeyCode.Space))
                 _controller.HandleDodgeInput();
 
+            // Jump — F
+            if (Input.GetKeyDown(KeyCode.F))
+                _controller.HandleJumpInput();
+
             // Skills — 1, 2, 3, 4
             if (Input.GetKeyDown(KeyCode.Alpha1)) _controller.HandleSkillInput(0);
             if (Input.GetKeyDown(KeyCode.Alpha2)) _controller.HandleSkillInput(1);

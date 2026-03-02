@@ -21,6 +21,7 @@ namespace SoR.Gameplay
         public PlayerMoveState MoveState { get; private set; }
         public PlayerAttackState AttackState { get; private set; }
         public PlayerDodgeState DodgeState { get; private set; }
+        public PlayerJumpState JumpState { get; private set; }
         public PlayerSkillState SkillState { get; private set; }
         public PlayerDeathState DeathState { get; private set; }
 
@@ -34,10 +35,24 @@ namespace SoR.Gameplay
         public Vector3 InputDirection { get; set; }
         public bool AttackInputPressed { get; set; }
         public bool DodgeInputPressed { get; set; }
+        public bool JumpInputPressed { get; set; }
         public int SkillInputIndex { get; set; } = -1;
 
         // Invincibility flag used during dodge.
         public bool IsInvincible { get; set; }
+
+        // Jump settings.
+        public float JumpForce { get; set; } = 8f;
+
+        // Dodge cooldown.
+        private float _dodgeCooldownTimer;
+        private const float DodgeCooldownDuration = 0.5f;
+        public bool CanDodge => _dodgeCooldownTimer <= 0f;
+
+        public void StartDodgeCooldown()
+        {
+            _dodgeCooldownTimer = DodgeCooldownDuration;
+        }
 
         private void Awake()
         {
@@ -65,6 +80,9 @@ namespace SoR.Gameplay
 
         private void Update()
         {
+            if (_dodgeCooldownTimer > 0f)
+                _dodgeCooldownTimer -= Time.deltaTime;
+
             _stateMachine.Update();
         }
 
@@ -74,6 +92,7 @@ namespace SoR.Gameplay
             MoveState = new PlayerMoveState(this);
             AttackState = new PlayerAttackState(this);
             DodgeState = new PlayerDodgeState(this);
+            JumpState = new PlayerJumpState(this);
             SkillState = new PlayerSkillState(this);
             DeathState = new PlayerDeathState(this);
         }
@@ -86,6 +105,11 @@ namespace SoR.Gameplay
         public void HandleDodgeInput()
         {
             DodgeInputPressed = true;
+        }
+
+        public void HandleJumpInput()
+        {
+            JumpInputPressed = true;
         }
 
         public void HandleSkillInput(int skillIndex)

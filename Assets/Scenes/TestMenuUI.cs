@@ -44,11 +44,16 @@ namespace SoR.Testing
 
         // ---- test data ----
         private BannerDefinitionSO _testBanner;
-        private ShopInventorySO _testShopDef;
+        private readonly Dictionary<string, ShopInventorySO> _shopDefs = new();
         private readonly List<RecipeDefinitionSO> _testRecipes = new();
         private readonly List<QuestDefinitionSO> _testQuests = new();
         private int _gold = 5000;
+        private int _guildTokens = 200;
         private int _accordEssence;
+
+        // ---- interaction prompt ----
+        private GameObject _interactPrompt;
+        private Text _interactPromptText;
 
         // ---- gacha log ----
         private Text _gachaLogText;
@@ -107,7 +112,7 @@ namespace SoR.Testing
             _screenKeys[KeyCode.M] = ShowMap;
             _screenKeys[KeyCode.Q] = ShowQuestLog;
             _screenKeys[KeyCode.K] = ShowSkills;
-            _screenKeys[KeyCode.E] = ShowEquipment;
+            // E is handled specially in Update() (NPC shop vs Equipment)
             _screenKeys[KeyCode.BackQuote] = ShowCheatMenu;
 
             // Persistent HUD elements (event-driven, no manual wiring needed)
@@ -132,8 +137,27 @@ namespace SoR.Testing
                 return;
             }
 
+            // Update interaction prompt (always, even when a screen is open)
+            UpdateInteractPrompt();
+
             // Only open screens when nothing is open (prevents accidental toggling)
             if (_activeScreen != null) return;
+
+            // E-key: context-sensitive — NPC shop if near an NPC, otherwise Equipment
+            if (UnityEngine.Input.GetKeyDown(KeyCode.E))
+            {
+                if (_sceneSetup != null)
+                {
+                    var nearNpc = _sceneSetup.GetNearestNPC(3.5f);
+                    if (nearNpc.HasValue)
+                    {
+                        ShowShopForNPC(nearNpc.Value);
+                        return;
+                    }
+                }
+                ShowEquipment();
+                return;
+            }
 
             foreach (var kvp in _screenKeys)
             {
@@ -228,22 +252,8 @@ namespace SoR.Testing
                 CraftingDiscipline.Runebinding, 3,
                 ("runic_dust", 4), ("moonstone", 1)));
 
-            // --- Shop ---
-            _testShopDef = ScriptableObject.CreateInstance<ShopInventorySO>();
-            _testShopDef.ShopName = "Greenreach General Store";
-            _testShopDef.ShopId = "greenreach_shop";
-            _testShopDef.Items = new List<ShopItem>
-            {
-                new ShopItem { ItemId = "health_potion", Price = 50, Stock = -1 },
-                new ShopItem { ItemId = "verdance_shard", Price = 120, Stock = 5 },
-                new ShopItem { ItemId = "iron_ore", Price = 25, Stock = -1 },
-                new ShopItem { ItemId = "herb_bundle", Price = 15, Stock = -1 },
-                new ShopItem { ItemId = "fire_crystal", Price = 300, Stock = 3 },
-                new ShopItem { ItemId = "silk_thread", Price = 40, Stock = 10 },
-                new ShopItem { ItemId = "runic_dust", Price = 80, Stock = 8 },
-                new ShopItem { ItemId = "moonstone", Price = 500, Stock = 1 }
-            };
-            _shop.RegisterShop(_testShopDef);
+            // --- Shops (all 6 GDD shops) ---
+            SeedAllShops();
 
             // --- Gacha Banner ---
             var pityConfig = ScriptableObject.CreateInstance<PityConfigSO>();
@@ -454,6 +464,223 @@ namespace SoR.Testing
         }
 
         // ================================================================
+        // Shop definitions
+        // ================================================================
+
+        private void SeedAllShops()
+        {
+            CreateAndRegisterShop("general_store", "Maren's General Store", new[]
+            {
+                ("health_potion", 50, -1),
+                ("verdance_shard", 120, 5),
+                ("herb_bundle", 15, -1),
+                ("antidote", 30, -1),
+                ("travel_ration", 20, -1),
+            });
+
+            CreateAndRegisterShop("brams_forge", "Bram's Forge", new[]
+            {
+                ("iron_sword", 250, 3),
+                ("steel_shield", 400, 2),
+                ("iron_ore", 25, -1),
+                ("repair_kit", 100, 5),
+                ("reinforced_helm", 350, 2),
+            });
+
+            CreateAndRegisterShop("seed_merchant", "Silas's Curious Seeds", new[]
+            {
+                ("ancient_seed", 200, 3),
+                ("blight_resistant_seed", 150, 5),
+                ("verdant_bulb", 80, -1),
+                ("growth_elixir", 120, 8),
+            });
+
+            CreateAndRegisterShop("guild_quartermaster", "Guild Quartermaster", new[]
+            {
+                ("guild_badge", 50, 1),
+                ("elite_potion", 80, 1),
+                ("guild_map", 30, 1),
+            });
+
+            CreateAndRegisterShop("wandering_druid", "Druid Enna's Remedies", new[]
+            {
+                ("purify_charm", 180, 3),
+                ("swamp_antidote", 60, -1),
+                ("fungal_extract", 90, 10),
+                ("blight_ward", 300, 1),
+            });
+
+            CreateAndRegisterShop("black_market", "The Whisperer's Wares", new[]
+            {
+                ("shadow_blade", 800, 1),
+                ("forbidden_tome", 1200, 1),
+                ("venom_vial", 150, 5),
+                ("dark_crystal", 500, 2),
+            });
+        }
+
+        private void CreateAndRegisterShop(string shopId, string shopName, (string itemId, int price, int stock)[] items)
+        {
+            var def = ScriptableObject.CreateInstance<ShopInventorySO>();
+            def.ShopName = shopName;
+            def.ShopId = shopId;
+            def.Items = new List<ShopItem>();
+            foreach (var (itemId, price, stock) in items)
+                def.Items.Add(new ShopItem { ItemId = itemId, Price = price, Stock = stock });
+            _shop.RegisterShop(def);
+            _shopDefs[shopId] = def;
+        }
+
+        // ================================================================
+        // NPC interaction
+        // ================================================================
+
+        private void UpdateInteractPrompt()
+        {
+            if (_sceneSetup == null || _activeScreen != null)
+            {
+                ClearInteractPrompt();
+                return;
+            }
+
+            var nearNpc = _sceneSetup.GetNearestNPC(3.5f);
+            if (nearNpc.HasValue)
+                ShowInteractPrompt(nearNpc.Value.Name);
+            else
+                ClearInteractPrompt();
+        }
+
+        private void ShowInteractPrompt(string npcName)
+        {
+            if (_interactPrompt == null)
+            {
+                _interactPrompt = new GameObject("InteractPrompt");
+                _interactPrompt.transform.SetParent(_canvas.transform, false);
+                var rt = _interactPrompt.AddComponent<RectTransform>();
+                rt.anchorMin = new Vector2(0.5f, 0f);
+                rt.anchorMax = new Vector2(0.5f, 0f);
+                rt.pivot = new Vector2(0.5f, 0f);
+                rt.anchoredPosition = new Vector2(0f, 50f);
+                rt.sizeDelta = new Vector2(320f, 40f);
+
+                var bg = _interactPrompt.AddComponent<Image>();
+                bg.color = new Color(0.05f, 0.05f, 0.1f, 0.85f);
+
+                var textGo = new GameObject("Text");
+                textGo.transform.SetParent(_interactPrompt.transform, false);
+                _interactPromptText = textGo.AddComponent<Text>();
+                _interactPromptText.font = _font;
+                _interactPromptText.fontSize = 18;
+                _interactPromptText.color = new Color(1f, 0.9f, 0.6f);
+                _interactPromptText.alignment = TextAnchor.MiddleCenter;
+                var tRt = textGo.GetComponent<RectTransform>();
+                tRt.anchorMin = Vector2.zero;
+                tRt.anchorMax = Vector2.one;
+                tRt.offsetMin = Vector2.zero;
+                tRt.offsetMax = Vector2.zero;
+            }
+
+            _interactPromptText.text = $"[E] Talk to {npcName}";
+            _interactPrompt.SetActive(true);
+        }
+
+        private void ClearInteractPrompt()
+        {
+            if (_interactPrompt != null)
+                _interactPrompt.SetActive(false);
+        }
+
+        private void ShowShopForNPC(TestSceneSetup.NpcEntry npc)
+        {
+            if (!_shopDefs.TryGetValue(npc.ShopId, out var shopDef))
+            {
+                Debug.LogWarning($"[Shop] No shop definition for {npc.ShopId}");
+                return;
+            }
+
+            bool isGuildShop = npc.ShopId == "guild_quartermaster";
+            string currencyLabel = isGuildShop ? "Guild Tokens" : "Gold";
+            int currencyAmount = isGuildShop ? _guildTokens : _gold;
+
+            var panel = CreateScreenPanel(shopDef.ShopName);
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
+
+            // Currency header
+            AddLabel(panel.transform, $"{currencyLabel}: {currencyAmount}", 18, TextAnchor.MiddleRight,
+                new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-20f, -60f), new Vector2(250f, 30f), new Color(1f, 0.85f, 0.3f));
+
+            // If guild shop, also show gold
+            if (isGuildShop)
+            {
+                AddLabel(panel.transform, $"Gold: {_gold}", 14, TextAnchor.MiddleRight,
+                    new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
+                    new Vector2(-20f, -85f), new Vector2(200f, 24f), new Color(0.7f, 0.7f, 0.7f));
+            }
+
+            int row = 0;
+            foreach (var item in shopDef.Items)
+            {
+                string stockStr = item.Stock < 0 ? "inf" : item.Stock.ToString();
+                string priceTag = isGuildShop ? $"{item.Price} GT" : $"{item.Price}g";
+                bool canAfford = isGuildShop
+                    ? _guildTokens >= item.Price
+                    : _shop.CanBuy(shopDef.ShopId, item.ItemId, _gold);
+                bool inStock = item.Stock != 0;
+                bool canBuy = canAfford && inStock;
+                Color color = canBuy ? Color.white : new Color(0.5f, 0.5f, 0.5f);
+
+                string line = $"  {FormatItemName(item.ItemId)}   {priceTag}   Stock: {stockStr}";
+                AddRowLabel(content, line, row, color);
+
+                string capturedShopId = shopDef.ShopId;
+                string capturedItemId = item.ItemId;
+                bool capturedIsGuild = isGuildShop;
+                var capturedNpc = npc;
+                AddButton(content, "Buy", row, () =>
+                {
+                    TryBuyFromShop(capturedShopId, capturedItemId, capturedIsGuild);
+                    CloseActiveScreen();
+                    ShowShopForNPC(capturedNpc);
+                });
+
+                row++;
+            }
+
+            SetContentHeight(content, row);
+        }
+
+        private void TryBuyFromShop(string shopId, string itemId, bool isGuildToken)
+        {
+            if (isGuildToken)
+            {
+                // Guild token shop: manually check price and stock, then use _shop.Buy with dummy gold
+                if (!_shopDefs.TryGetValue(shopId, out var def)) return;
+                ShopItem target = null;
+                foreach (var si in def.Items)
+                {
+                    if (si.ItemId == itemId) { target = si; break; }
+                }
+                if (target == null) return;
+                if (_guildTokens < target.Price) return;
+                if (target.Stock == 0) return;
+
+                // Use a temporary gold reserve to satisfy ShopSystem.Buy
+                int tempGold = int.MaxValue / 2;
+                if (_shop.Buy(shopId, itemId, ref tempGold))
+                {
+                    _guildTokens -= target.Price;
+                    Debug.Log($"[Shop] Bought {itemId} for {target.Price} Guild Tokens");
+                }
+            }
+            else
+            {
+                if (_shop.Buy(shopId, itemId, ref _gold))
+                    Debug.Log($"[Shop] Bought {itemId}");
+            }
+        }
+
+        // ================================================================
         // Canvas
         // ================================================================
 
@@ -486,7 +713,7 @@ namespace SoR.Testing
             var textGo = new GameObject("HintText");
             textGo.transform.SetParent(_hintBar.transform, false);
             var text = textGo.AddComponent<Text>();
-            text.text = "[I] Inventory  [E] Equipment  [B] Shop  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [`] Cheats  [ESC] Close";
+            text.text = "[I] Inventory  [E] NPC/Equipment  [B] Shop List  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [`] Cheats  [ESC] Close";
             text.font = _font;
             text.fontSize = 16;
             text.color = Color.white;
@@ -641,33 +868,39 @@ namespace SoR.Testing
 
         private void ShowShop()
         {
-            var panel = CreateScreenPanel("Greenreach General Store");
+            var panel = CreateScreenPanel("Shops & Merchants");
             var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
 
-            // Gold header
-            AddLabel(panel.transform, $"Gold: {_gold}", 18, TextAnchor.MiddleRight,
+            // Currency header
+            AddLabel(panel.transform, $"Gold: {_gold}   |   Guild Tokens: {_guildTokens}", 18, TextAnchor.MiddleRight,
                 new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-20f, -60f), new Vector2(200f, 30f), new Color(1f, 0.85f, 0.3f));
+                new Vector2(-20f, -60f), new Vector2(450f, 30f), new Color(1f, 0.85f, 0.3f));
 
             int row = 0;
-            foreach (var item in _testShopDef.Items)
+            foreach (var kvp in _shopDefs)
             {
-                string stockStr = item.Stock < 0 ? "inf" : item.Stock.ToString();
-                bool canBuy = _shop.CanBuy(_testShopDef.ShopId, item.ItemId, _gold);
-                Color color = canBuy ? Color.white : new Color(0.5f, 0.5f, 0.5f);
-                string line = $"  {FormatItemName(item.ItemId)}   {item.Price}g   Stock: {stockStr}";
-                AddRowLabel(content, line, row, color);
+                var def = kvp.Value;
+                string currency = kvp.Key == "guild_quartermaster" ? "Guild Tokens" : "Gold";
+                Color color = new Color(0.85f, 0.85f, 0.95f);
+                AddRowLabel(content, $"  {def.ShopName}   ({currency})", row, color);
 
-                // Buy button
-                int capturedRow = row;
-                string capturedId = item.ItemId;
-                AddButton(content, "Buy", row, () =>
+                string capturedId = kvp.Key;
+                AddButton(content, "Visit", row, () =>
                 {
-                    if (_shop.Buy(_testShopDef.ShopId, capturedId, ref _gold))
+                    // Find the NPC entry for this shop to use ShowShopForNPC
+                    if (_sceneSetup != null)
                     {
-                        Debug.Log($"[Shop] Bought {capturedId}");
+                        // Search NPC list via GetNearestNPC won't work here — build a dummy entry
+                        var npcEntry = new TestSceneSetup.NpcEntry
+                        {
+                            Name = def.ShopName,
+                            ShopId = capturedId,
+                            ShopRole = "",
+                            Root = null,
+                            NametagCanvas = null
+                        };
                         CloseActiveScreen();
-                        ShowShop(); // Refresh
+                        ShowShopForNPC(npcEntry);
                     }
                 });
 
@@ -1786,13 +2019,36 @@ namespace SoR.Testing
 
             AddRowLabel(content, "", row, Color.white); row++;
 
-            // ---- GOLD / ESSENCE ----
+            // ---- GOLD / ESSENCE / GUILD TOKENS ----
             AddRowLabel(content, "  --- Currency ---", row, headerColor); row++;
 
             AddRowLabel(content, $"  Gold: {_gold}", row, cheatColor);
             AddCheatValueButtons(content, row, new[] { 1000f, 10000f, 100000f, 999999f }, v =>
             {
                 _gold = (int)v;
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Add 1000 Gold", row, cheatColor);
+            AddButton(content, "+1000", row, () =>
+            {
+                _gold += 1000;
+                Debug.Log($"[Cheat] Added 1000 gold (now {_gold})");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, $"  Guild Tokens: {_guildTokens}", row, cheatColor);
+            AddCheatValueButtons(content, row, new[] { 100f, 500f, 1000f, 9999f }, v =>
+            {
+                _guildTokens = (int)v;
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Add 100 Guild Tokens", row, cheatColor);
+            AddButton(content, "+100", row, () =>
+            {
+                _guildTokens += 100;
+                Debug.Log($"[Cheat] Added 100 guild tokens (now {_guildTokens})");
                 CloseActiveScreen(); ShowCheatMenu();
             }); row++;
 
@@ -2096,6 +2352,48 @@ namespace SoR.Testing
                     _sceneSetup.RespawnAllEnemies();
                     CloseActiveScreen(); ShowCheatMenu();
                 }); row++;
+            }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- TELEPORT TO NPC ----
+            AddRowLabel(content, "  --- Teleport to NPC ---", row, headerColor); row++;
+
+            if (_sceneSetup != null && _sceneSetup.PlayerTransform != null)
+            {
+                var npcNames = new[] { "Maren", "Bram", "Silas", "Quartermaster Voss", "Druid Enna", "The Whisperer" };
+                var npcPositions = new[]
+                {
+                    new Vector3(8f, 0f, -8f),
+                    new Vector3(-12f, 0f, -6f),
+                    new Vector3(0f, 0f, -15f),
+                    new Vector3(-5f, 0f, -20f),
+                    new Vector3(50f, -1.5f, -48f),
+                    new Vector3(48f, 3.5f, 48f),
+                };
+
+                for (int i = 0; i < npcNames.Length; i++)
+                {
+                    string npcName = npcNames[i];
+                    Vector3 pos = npcPositions[i] + new Vector3(2f, 0f, 0f); // offset so player doesn't overlap NPC
+                    AddRowLabel(content, $"  Teleport to {npcName}", row, cheatColor);
+                    AddButton(content, "Warp", row, () =>
+                    {
+                        var cc = _sceneSetup.PlayerTransform.GetComponent<CharacterController>();
+                        if (cc != null)
+                        {
+                            cc.enabled = false;
+                            _sceneSetup.PlayerTransform.position = pos;
+                            cc.enabled = true;
+                        }
+                        else
+                        {
+                            _sceneSetup.PlayerTransform.position = pos;
+                        }
+                        Debug.Log($"[Cheat] Teleported to {npcName}");
+                        CloseActiveScreen(); ShowCheatMenu();
+                    }); row++;
+                }
             }
 
             SetContentHeight(content, row);
@@ -2468,7 +2766,7 @@ namespace SoR.Testing
         // Companion leveling helpers
         // ================================================================
 
-        private int GetCompanionLevel(string id) => _companionLevels.GetValueOrDefault(id, 1);
+        private int GetCompanionLevel(string id) => id != null ? _companionLevels.GetValueOrDefault(id, 1) : 1;
 
         private struct UpgradeCost
         {

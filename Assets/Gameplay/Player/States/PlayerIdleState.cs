@@ -31,8 +31,22 @@ namespace SoR.Gameplay
             if (_controller.DodgeInputPressed)
             {
                 _controller.DodgeInputPressed = false;
-                _controller.StateMachine.ChangeState(_controller.DodgeState);
-                return;
+                if (_controller.CanDodge)
+                {
+                    _controller.StateMachine.ChangeState(_controller.DodgeState);
+                    return;
+                }
+            }
+
+            // Transition to jump.
+            if (_controller.JumpInputPressed)
+            {
+                _controller.JumpInputPressed = false;
+                if (_controller.Movement.IsGrounded)
+                {
+                    _controller.StateMachine.ChangeState(_controller.JumpState);
+                    return;
+                }
             }
 
             // Transition to skill.
