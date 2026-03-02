@@ -159,6 +159,7 @@ namespace SoR.Testing
             CreateGround();
             CreatePlayer();
             CreateEnemies();
+            CreateTown();
             CreateNPCs();
             CreateCompanionWeapon();
             SetupCamera();
@@ -310,20 +311,128 @@ namespace SoR.Testing
         }
 
         // ================================================================
+        // Town (market area in Greenreach Valley)
+        // ================================================================
+
+        private void CreateTown()
+        {
+            CreateTownDecor();
+
+            // Stalls for each NPC — position is the NPC's position, stall is built behind them
+            // Row 1 (north): Silas (left, facing right), Maren (right, facing left)
+            CreateTownStall(new Vector3(-6f, 0f, -7f), true,
+                new Color(0.25f, 0.55f, 0.2f), new Color(0.35f, 0.65f, 0.3f), "Silas_Stall");
+            CreateTownStall(new Vector3(6f, 0f, -7f), false,
+                new Color(0.45f, 0.65f, 0.35f), new Color(0.55f, 0.75f, 0.45f), "Maren_Stall");
+
+            // Row 2 (middle): Bram (left, facing right), Voss (right, facing left)
+            CreateTownStall(new Vector3(-6f, 0f, -15f), true,
+                new Color(0.6f, 0.35f, 0.15f), new Color(0.7f, 0.45f, 0.2f), "Bram_Stall");
+            CreateTownStall(new Vector3(6f, 0f, -15f), false,
+                new Color(0.35f, 0.5f, 0.7f), new Color(0.45f, 0.6f, 0.8f), "Voss_Stall");
+
+            // Row 3 (south): Enna (left, facing right), Whisperer (right, facing left)
+            CreateTownStall(new Vector3(-8f, 0f, -22f), true,
+                new Color(0.2f, 0.55f, 0.5f), new Color(0.3f, 0.65f, 0.6f), "Enna_Stall");
+            CreateTownStall(new Vector3(8f, 0f, -22f), false,
+                new Color(0.35f, 0.15f, 0.45f), new Color(0.45f, 0.2f, 0.55f), "Whisperer_Stall");
+        }
+
+        /// <summary>
+        /// Creates a single shop stall: back wall, counter, and awning.
+        /// facingRight means the stall opens toward +X (NPC faces +X).
+        /// </summary>
+        private void CreateTownStall(Vector3 npcPos, bool facingRight, Color wallColor, Color roofColor, string name)
+        {
+            var parent = new GameObject(name);
+            parent.transform.position = npcPos;
+
+            // Direction multiplier: stall structure is behind the NPC
+            float dir = facingRight ? -1f : 1f;
+
+            // Back wall — behind the NPC
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.name = "Wall";
+            wall.transform.SetParent(parent.transform, false);
+            wall.transform.localPosition = new Vector3(dir * 1.5f, 1.25f, 0f);
+            wall.transform.localScale = new Vector3(0.3f, 2.5f, 3f);
+            wall.GetComponent<Renderer>().material = CreateMaterial(wallColor);
+
+            // Counter/table — in front of the wall, between NPC and player
+            var counter = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            counter.name = "Counter";
+            counter.transform.SetParent(parent.transform, false);
+            counter.transform.localPosition = new Vector3(dir * -0.5f, 0.4f, 0f);
+            counter.transform.localScale = new Vector3(1f, 0.8f, 2.5f);
+            counter.GetComponent<Renderer>().material = CreateMaterial(Color.Lerp(wallColor, Color.white, 0.2f));
+
+            // Awning/roof — above the stall
+            var awning = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            awning.name = "Awning";
+            awning.transform.SetParent(parent.transform, false);
+            awning.transform.localPosition = new Vector3(0f, 2.8f, 0f);
+            awning.transform.localScale = new Vector3(2f, 0.1f, 3.5f);
+            awning.GetComponent<Renderer>().material = CreateMaterial(roofColor);
+        }
+
+        /// <summary>
+        /// Creates town decorations: ground tile, central well, corner posts.
+        /// </summary>
+        private void CreateTownDecor()
+        {
+            // Town square ground tile — lighter cobblestone color
+            var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+            ground.name = "TownSquareGround";
+            ground.transform.position = new Vector3(0f, 0.01f, -14f);
+            ground.transform.localScale = new Vector3(2.4f, 1f, 2f); // 24x20 units
+            ground.GetComponent<Renderer>().material = CreateMaterial(new Color(0.55f, 0.5f, 0.4f));
+
+            // Central well/fountain
+            var well = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            well.name = "TownWell";
+            well.transform.position = new Vector3(0f, 0.3f, -12f);
+            well.transform.localScale = new Vector3(1.5f, 0.6f, 1.5f);
+            well.GetComponent<Renderer>().material = CreateMaterial(new Color(0.5f, 0.5f, 0.5f));
+
+            // Well rim — slightly larger cylinder on top
+            var rim = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            rim.name = "WellRim";
+            rim.transform.position = new Vector3(0f, 0.6f, -12f);
+            rim.transform.localScale = new Vector3(1.7f, 0.1f, 1.7f);
+            rim.GetComponent<Renderer>().material = CreateMaterial(new Color(0.4f, 0.4f, 0.42f));
+
+            // Corner posts at the 4 corners of the market area
+            var postColor = CreateMaterial(new Color(0.45f, 0.35f, 0.25f));
+            Vector3[] postPositions =
+            {
+                new Vector3(-11f, 0.75f, -4f),
+                new Vector3(11f, 0.75f, -4f),
+                new Vector3(-11f, 0.75f, -25f),
+                new Vector3(11f, 0.75f, -25f),
+            };
+            for (int i = 0; i < postPositions.Length; i++)
+            {
+                var post = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                post.name = $"CornerPost_{i}";
+                post.transform.position = postPositions[i];
+                post.transform.localScale = new Vector3(0.4f, 1.5f, 0.4f);
+                post.GetComponent<Renderer>().material = postColor;
+            }
+        }
+
+        // ================================================================
         // NPCs (shop keepers)
         // ================================================================
 
         private void CreateNPCs()
         {
-            // Greenreach Valley (height 0)
-            SpawnNPC("Maren",               "general_store",       "General Store",        new Vector3(8f, 0f, -8f),    new Color(0.6f, 0.9f, 0.5f));
-            SpawnNPC("Bram",                "brams_forge",         "Blacksmith",           new Vector3(-12f, 0f, -6f),  new Color(0.8f, 0.5f, 0.25f));
-            SpawnNPC("Silas",               "seed_merchant",       "Seed Merchant",        new Vector3(0f, 0f, -15f),   new Color(0.3f, 0.75f, 0.3f));
-            SpawnNPC("Quartermaster Voss",  "guild_quartermaster", "Guild Quartermaster",  new Vector3(-5f, 0f, -20f),  new Color(0.45f, 0.6f, 0.8f));
-            // Gloomtide Marshes
-            SpawnNPC("Druid Enna",          "wandering_druid",     "Wandering Druid",      new Vector3(50f, 0f, -48f), new Color(0.3f, 0.7f, 0.65f));
-            // The Withered Heart
-            SpawnNPC("The Whisperer",       "black_market",        "Black Market",         new Vector3(48f, 0f, 48f), new Color(0.45f, 0.2f, 0.55f));
+            // All NPCs now in Greenreach Valley town market
+            SpawnNPC("Silas",               "seed_merchant",       "Seed Merchant",        new Vector3(-6f, 0f, -7f),   new Color(0.3f, 0.75f, 0.3f));
+            SpawnNPC("Maren",               "general_store",       "General Store",        new Vector3(6f, 0f, -7f),    new Color(0.6f, 0.9f, 0.5f));
+            SpawnNPC("Bram",                "brams_forge",         "Blacksmith",           new Vector3(-6f, 0f, -15f),  new Color(0.8f, 0.5f, 0.25f));
+            SpawnNPC("Quartermaster Voss",  "guild_quartermaster", "Guild Quartermaster",  new Vector3(6f, 0f, -15f),   new Color(0.45f, 0.6f, 0.8f));
+            SpawnNPC("Druid Enna",          "wandering_druid",     "Wandering Druid",      new Vector3(-8f, 0f, -22f),  new Color(0.3f, 0.7f, 0.65f));
+            SpawnNPC("The Whisperer",       "black_market",        "Black Market",         new Vector3(8f, 0f, -22f),   new Color(0.45f, 0.2f, 0.55f));
         }
 
         private void SpawnNPC(string npcName, string shopId, string shopRole, Vector3 position, Color color)

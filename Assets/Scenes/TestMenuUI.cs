@@ -20,8 +20,8 @@ namespace SoR.Testing
     ///
     /// Keybinds (hold TAB to see hint bar):
     ///   I = Inventory       C = Crafting      M = Map
-    ///   B = Shop (Buy)      G = Gacha         Q = Quest Log
-    ///   K = Skills          P = Companions    E = Equipment
+    ///   G = Gacha           Q = Quest Log     K = Skills
+    ///   P = Companions      E = NPC Shop / Equipment
     ///   ESC = Close current screen
     /// </summary>
     public class TestMenuUI : MonoBehaviour
@@ -105,7 +105,6 @@ namespace SoR.Testing
 
             // Map keybinds to screen builders
             _screenKeys[KeyCode.I] = ShowInventory;
-            _screenKeys[KeyCode.B] = ShowShop;
             _screenKeys[KeyCode.C] = ShowCrafting;
             _screenKeys[KeyCode.G] = ShowGacha;
             _screenKeys[KeyCode.P] = ShowCompanions;
@@ -713,7 +712,7 @@ namespace SoR.Testing
             var textGo = new GameObject("HintText");
             textGo.transform.SetParent(_hintBar.transform, false);
             var text = textGo.AddComponent<Text>();
-            text.text = "[I] Inventory  [E] NPC/Equipment  [B] Shop List  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [`] Cheats  [ESC] Close";
+            text.text = "[I] Inventory  [E] NPC/Equipment  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [`] Cheats  [ESC] Close";
             text.font = _font;
             text.fontSize = 16;
             text.color = Color.white;
@@ -865,50 +864,6 @@ namespace SoR.Testing
         // ================================================================
         // SHOP SCREEN
         // ================================================================
-
-        private void ShowShop()
-        {
-            var panel = CreateScreenPanel("Shops & Merchants");
-            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
-
-            // Currency header
-            AddLabel(panel.transform, $"Gold: {_gold}   |   Guild Tokens: {_guildTokens}", 18, TextAnchor.MiddleRight,
-                new Vector2(1f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-20f, -60f), new Vector2(450f, 30f), new Color(1f, 0.85f, 0.3f));
-
-            int row = 0;
-            foreach (var kvp in _shopDefs)
-            {
-                var def = kvp.Value;
-                string currency = kvp.Key == "guild_quartermaster" ? "Guild Tokens" : "Gold";
-                Color color = new Color(0.85f, 0.85f, 0.95f);
-                AddRowLabel(content, $"  {def.ShopName}   ({currency})", row, color);
-
-                string capturedId = kvp.Key;
-                AddButton(content, "Visit", row, () =>
-                {
-                    // Find the NPC entry for this shop to use ShowShopForNPC
-                    if (_sceneSetup != null)
-                    {
-                        // Search NPC list via GetNearestNPC won't work here — build a dummy entry
-                        var npcEntry = new TestSceneSetup.NpcEntry
-                        {
-                            Name = def.ShopName,
-                            ShopId = capturedId,
-                            ShopRole = "",
-                            Root = null,
-                            NametagCanvas = null
-                        };
-                        CloseActiveScreen();
-                        ShowShopForNPC(npcEntry);
-                    }
-                });
-
-                row++;
-            }
-
-            SetContentHeight(content, row);
-        }
 
         // ================================================================
         // CRAFTING SCREEN
@@ -2356,20 +2311,41 @@ namespace SoR.Testing
 
             AddRowLabel(content, "", row, Color.white); row++;
 
-            // ---- TELEPORT TO NPC ----
-            AddRowLabel(content, "  --- Teleport to NPC ---", row, headerColor); row++;
+            // ---- TELEPORT TO TOWN / NPC ----
+            AddRowLabel(content, "  --- Teleport to Town / NPC ---", row, headerColor); row++;
 
             if (_sceneSetup != null && _sceneSetup.PlayerTransform != null)
             {
-                var npcNames = new[] { "Maren", "Bram", "Silas", "Quartermaster Voss", "Druid Enna", "The Whisperer" };
+                // Teleport to town center (near the well)
+                AddRowLabel(content, "  Teleport to Town Center", row, cheatColor);
+                AddButton(content, "Warp", row, () =>
+                {
+                    Vector3 townCenter = new Vector3(0f, 0f, -12f);
+                    var cc = _sceneSetup.PlayerTransform.GetComponent<CharacterController>();
+                    if (cc != null)
+                    {
+                        cc.enabled = false;
+                        _sceneSetup.PlayerTransform.position = townCenter;
+                        cc.enabled = true;
+                    }
+                    else
+                    {
+                        _sceneSetup.PlayerTransform.position = townCenter;
+                    }
+                    Debug.Log("[Cheat] Teleported to Town Center");
+                    CloseActiveScreen(); ShowCheatMenu();
+                }); row++;
+
+                // Individual NPC teleports (updated to town positions)
+                var npcNames = new[] { "Silas", "Maren", "Bram", "Quartermaster Voss", "Druid Enna", "The Whisperer" };
                 var npcPositions = new[]
                 {
-                    new Vector3(8f, 0f, -8f),
-                    new Vector3(-12f, 0f, -6f),
-                    new Vector3(0f, 0f, -15f),
-                    new Vector3(-5f, 0f, -20f),
-                    new Vector3(50f, 0f, -48f),
-                    new Vector3(48f, 0f, 48f),
+                    new Vector3(-6f, 0f, -7f),
+                    new Vector3(6f, 0f, -7f),
+                    new Vector3(-6f, 0f, -15f),
+                    new Vector3(6f, 0f, -15f),
+                    new Vector3(-8f, 0f, -22f),
+                    new Vector3(8f, 0f, -22f),
                 };
 
                 for (int i = 0; i < npcNames.Length; i++)
