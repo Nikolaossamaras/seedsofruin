@@ -47,6 +47,31 @@ namespace SoR.Testing
         // ---- enemies ----
         private readonly List<EnemyEntry> _enemies = new();
 
+        /// <summary>Kill all currently alive enemies.</summary>
+        public void KillAllEnemies()
+        {
+            foreach (var entry in _enemies)
+            {
+                if (entry.AI != null && entry.AI.IsAlive)
+                {
+                    var payload = new DamagePayload(entry.AI.CurrentHealth + 999f, DamageType.Physical, Element.None, false, 0f);
+                    entry.AI.TakeDamage(payload, entry.AI.transform.position);
+                }
+            }
+            Debug.Log("[Cheat] All enemies killed");
+        }
+
+        /// <summary>Reset all enemies to full health at their spawn positions.</summary>
+        public void RespawnAllEnemies()
+        {
+            foreach (var entry in _enemies)
+            {
+                if (entry.AI != null)
+                    entry.AI.ResetHealth();
+            }
+            Debug.Log("[Cheat] All enemies respawned");
+        }
+
         // ---- companions ----
         private readonly List<CompanionEntry> _companions = new();
         private WeaponDefinitionSO _companionWeapon;
@@ -291,22 +316,90 @@ namespace SoR.Testing
 
         private void CreateEnemies()
         {
-            Vector3[] positions =
-            {
-                new Vector3(5f, 0f, 5f),
-                new Vector3(-4f, 0f, 6f),
-                new Vector3(0f, 0f, -7f)
-            };
+            // GDD-accurate enemy roster across 5 regional zones
 
-            string[] names = { "Blighted_Wolf", "Blighted_Wolf", "Blighted_Wolf" };
+            // Greenreach Valley (near spawn, z: 3-15, x: -10 to 10)
+            SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(5f, 0f, 5f));
+            SpawnEnemy("Withered Wolf",       2,  Element.None,    Rarity.Common, "Withered Beast",   new Vector3(-3f, 0f, 7f));
+            SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(8f, 0f, 3f));
+            SpawnEnemy("Blight Beetle",       3,  Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(-6f, 0f, 4f));
+            SpawnEnemy("Corrupted Farmhand",  5,  Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(0f, 0f, 10f));
+            SpawnEnemy("Wither Stag",         8,  Element.Verdant, Rarity.Rare,   "Withered Beast",   new Vector3(0f, 0f, 15f));
 
-            for (int i = 0; i < 3; i++)
-                _enemies.Add(CreateEnemy(names[i], positions[i]));
+            // The Ashen Steppe (x: -20 to -5, z: -5 to -18)
+            SpawnEnemy("Dustcrawler",         11, Element.Pyro,    Rarity.Common, "Withered Beast",   new Vector3(-8f, 0f, -6f));
+            SpawnEnemy("Scorched Viper",      13, Element.Pyro,    Rarity.Common, "The Untamed",      new Vector3(-12f, 0f, -10f));
+            SpawnEnemy("Acolyte Ranger",      15, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-15f, 0f, -14f));
+            SpawnEnemy("Ashwalker Golem",     17, Element.Pyro,    Rarity.Rare,   "Constructs",       new Vector3(-10f, 0f, -18f));
+
+            // Gloomtide Marshes (x: 5 to 20, z: -5 to -18)
+            SpawnEnemy("Bogfiend",            17, Element.Umbral,  Rarity.Common, "Blight Spawn",     new Vector3(8f, 0f, -6f));
+            SpawnEnemy("Sporecap Horror",     19, Element.Verdant, Rarity.Common, "Blight Spawn",     new Vector3(12f, 0f, -10f));
+            SpawnEnemy("Drowned Sentinel",    21, Element.Umbral,  Rarity.Common, "Corrupted Human",  new Vector3(15f, 0f, -14f));
+            SpawnEnemy("The Mire Queen",      23, Element.Umbral,  Rarity.Rare,   "Blight Spawn",     new Vector3(10f, 0f, -18f));
+
+            // Frosthollow Peaks (x: -20 to -8, z: 5 to 18)
+            SpawnEnemy("Frostwight",          23, Element.Cryo,    Rarity.Common, "Withered Beast",   new Vector3(-10f, 0f, 8f));
+            SpawnEnemy("Glacial Construct",   26, Element.Cryo,    Rarity.Common, "Constructs",       new Vector3(-14f, 0f, 12f));
+            SpawnEnemy("Acolyte Warder",      28, Element.None,    Rarity.Common, "Varek's Acolytes", new Vector3(-18f, 0f, 15f));
+            SpawnEnemy("Avalanche Beast",     31, Element.Cryo,    Rarity.Rare,   "Withered Beast",   new Vector3(-12f, 0f, 18f));
+
+            // The Withered Heart (x: 8 to 20, z: 5 to 18)
+            SpawnEnemy("Hollow Shade",        32, Element.None,    Rarity.Common, "Blight Spawn",     new Vector3(10f, 0f, 8f));
+            SpawnEnemy("Rootwraith",          35, Element.Verdant, Rarity.Common, "Withered Beast",   new Vector3(14f, 0f, 12f));
+            SpawnEnemy("Wither Knight",       37, Element.None,    Rarity.Common, "Corrupted Human",  new Vector3(18f, 0f, 15f));
+            SpawnEnemy("Blight Colossus",     39, Element.None,    Rarity.Rare,   "Blight Spawn",     new Vector3(12f, 0f, 18f));
         }
 
-        private EnemyEntry CreateEnemy(string enemyName, Vector3 position)
+        private void SpawnEnemy(string enemyName, int level, Element element, Rarity tier, string category, Vector3 position)
         {
-            // Root
+            _enemies.Add(CreateEnemyFromTemplate(enemyName, level, element, tier, category, position));
+        }
+
+        private static Color EnemyCategoryColor(string category) => category switch
+        {
+            "Withered Beast"   => new Color(0.6f, 0.3f, 0.15f),  // Dark brown
+            "Blight Spawn"     => new Color(0.5f, 0.8f, 0.2f),   // Sickly green
+            "Corrupted Human"  => new Color(0.7f, 0.5f, 0.7f),   // Muted purple
+            "The Untamed"      => new Color(0.8f, 0.7f, 0.4f),   // Tawny/natural
+            "Varek's Acolytes" => new Color(0.9f, 0.3f, 0.3f),   // Crimson
+            "Constructs"       => new Color(0.5f, 0.6f, 0.7f),   // Steel gray
+            _ => new Color(0.7f, 0.7f, 0.7f),
+        };
+
+        private EnemyEntry CreateEnemyFromTemplate(string enemyName, int level, Element element, Rarity tier, string category, Vector3 position)
+        {
+            // --- Stat formulas per tier ---
+            //   Base HP = 50 + level * 15
+            //   Tier multipliers: Common 1x, Rare(Elite) 2.5x, Legendary 5x, Mythic 10x
+            float baseHp = 50f + level * 15f;
+            float baseStagger = 30f + level * 5f;
+
+            float hpMult = tier switch { Rarity.Common => 1f, Rarity.Rare => 2.5f, Rarity.Legendary => 5f, Rarity.Mythic => 10f, _ => 1f };
+            float staggerMult = tier switch { Rarity.Common => 1f, Rarity.Rare => 2f, Rarity.Legendary => 3f, Rarity.Mythic => 5f, _ => 1f };
+            float damage = tier switch { Rarity.Common => 10f + level, Rarity.Rare => 15f + level * 2f, Rarity.Legendary => 20f + level * 3f, Rarity.Mythic => 25f + level * 4f, _ => 10f + level };
+            float speed = tier switch { Rarity.Common => 2.5f, Rarity.Rare => 3f, Rarity.Legendary => 2f, Rarity.Mythic => 1.5f, _ => 2.5f };
+            int xpReward = tier switch { Rarity.Common => level * 10, Rarity.Rare => level * 30, Rarity.Legendary => level * 60, Rarity.Mythic => level * 100, _ => level * 10 };
+            int goldReward = tier switch { Rarity.Common => level * 5, Rarity.Rare => level * 15, Rarity.Legendary => level * 30, Rarity.Mythic => level * 50, _ => level * 5 };
+
+            float finalHp = baseHp * hpMult;
+            float finalStagger = baseStagger * staggerMult;
+
+            // --- Visual scale: elites are larger ---
+            float visualScale = tier switch { Rarity.Common => 1f, Rarity.Rare => 1.3f, Rarity.Legendary => 1.6f, Rarity.Mythic => 2f, _ => 1f };
+
+            // --- Color: element-based or category-based, tinted by tier ---
+            Color baseColor = element != Element.None
+                ? ElementToColor(element)
+                : EnemyCategoryColor(category);
+            float tierBrightness = tier switch { Rarity.Common => 0.7f, Rarity.Rare => 1f, Rarity.Legendary => 1.2f, Rarity.Mythic => 1.4f, _ => 0.7f };
+            Color finalColor = new Color(
+                Mathf.Min(baseColor.r * tierBrightness, 1f),
+                Mathf.Min(baseColor.g * tierBrightness, 1f),
+                Mathf.Min(baseColor.b * tierBrightness, 1f),
+                1f);
+
+            // --- Root ---
             var go = new GameObject(enemyName);
             go.transform.position = position;
 
@@ -317,7 +410,8 @@ namespace SoR.Testing
             {
                 enemyVisual = Instantiate(enemyPrefab, go.transform, false);
                 enemyVisual.name = "EnemyModel";
-                enemyVisual.transform.localPosition = new Vector3(0f, 0.75f, 0f);
+                enemyVisual.transform.localPosition = new Vector3(0f, 0.75f * visualScale, 0f);
+                enemyVisual.transform.localScale = Vector3.one * visualScale;
                 StripColliders(enemyVisual);
             }
             else
@@ -325,52 +419,58 @@ namespace SoR.Testing
                 enemyVisual = GameObject.CreatePrimitive(PrimitiveType.Cube);
                 enemyVisual.name = "EnemyModel";
                 enemyVisual.transform.SetParent(go.transform, false);
-                enemyVisual.transform.localPosition = new Vector3(0f, 0.75f, 0f);
-                enemyVisual.transform.localScale = new Vector3(1f, 1.5f, 1f);
+                enemyVisual.transform.localPosition = new Vector3(0f, 0.75f * visualScale, 0f);
+                enemyVisual.transform.localScale = new Vector3(1f * visualScale, 1.5f * visualScale, 1f * visualScale);
                 Object.Destroy(enemyVisual.GetComponent<BoxCollider>());
             }
 
-            // Material — try custom, else default red
+            // Material — element/tier colored
             var enemyMat = TryLoadAsset<Material>("TestAssets/Enemies/EnemyMaterial");
             var enemyRenderer = enemyVisual.GetComponentInChildren<Renderer>();
             if (enemyRenderer != null)
             {
                 enemyRenderer.material = enemyMat != null
-                    ? enemyMat
-                    : CreateMaterial(new Color(0.9f, 0.2f, 0.2f));
+                    ? new Material(enemyMat) { color = finalColor }
+                    : CreateMaterial(finalColor);
             }
 
-            // Collider on root for hit detection
+            // Collider on root for hit detection (scaled)
             var col = go.AddComponent<BoxCollider>();
-            col.center = new Vector3(0f, 0.75f, 0f);
-            col.size = new Vector3(1f, 1.5f, 1f);
+            col.center = new Vector3(0f, 0.75f * visualScale, 0f);
+            col.size = new Vector3(1f * visualScale, 1.5f * visualScale, 1f * visualScale);
 
             // Definition
             var def = ScriptableObject.CreateInstance<EnemyDefinitionSO>();
             def.EnemyName = enemyName;
-            def.EnemyId = enemyName.ToLower();
-            def.MaxHealth = 200f;
-            def.MaxStagger = 50f;
-            def.Element = Element.None;
-            def.Tier = Rarity.Common;
+            def.EnemyId = enemyName.ToLower().Replace(" ", "_");
+            def.MaxHealth = finalHp;
+            def.MaxStagger = finalStagger;
+            def.Element = element;
+            def.Tier = tier;
+            def.XPReward = xpReward;
+            def.GoldReward = goldReward;
             def.BaseStats = new StatBlock
             {
-                Vigor = 5f,
-                Strength = 8f,
-                Harvest = 3f,
-                Verdance = 0f,
-                Agility = 4f,
-                Resilience = 3f
+                Vigor = 3f + level * 0.5f,
+                Strength = 5f + level * 0.8f,
+                Harvest = 2f + level * 0.2f,
+                Verdance = element != Element.None ? 3f + level * 0.3f : 0f,
+                Agility = 3f + level * 0.4f,
+                Resilience = 2f + level * 0.3f,
             };
 
-            // AI controller (Awake fires — _definition is null so it does nothing)
+            // AI controller
             var ai = go.AddComponent<EnemyAIController>();
             ai.SetDefinition(def);
             ai.Target = _player.transform;
 
-            // Test behavior
+            // Test behavior with per-enemy stats
             var behavior = go.AddComponent<TestEnemyBehavior>();
             behavior.SetTarget(_player.transform);
+            behavior.AttackDamage = damage;
+            behavior.MoveSpeed = speed;
+            behavior.DetectRange = 10f + level * 0.15f;
+            behavior.AttackCooldown = tier == Rarity.Rare ? 1.2f : 1.5f;
             behavior.OnAttackHit += OnEnemyAttackPlayer;
 
             // World-space health bar

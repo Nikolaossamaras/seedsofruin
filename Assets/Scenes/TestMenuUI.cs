@@ -1248,74 +1248,217 @@ namespace SoR.Testing
             var panel = CreateScreenPanel("World Map");
             var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
 
+            // Full GDD region data: Name, Biome, Element, LevelMin, LevelMax, Hub, Theme, Blight
             var regions = new[]
             {
-                ("Greenreach", "Starting zone — lush forests", "Verdant", 1, 0.05f),
-                ("Ashen Steppe", "Scorched plains with volcanic vents", "Pyro", 15, 0.25f),
-                ("Frosthollow Peaks", "Frozen mountain range", "Cryo", 25, 0.15f),
-                ("Gloomtide Marshes", "Murky swamps filled with umbral energy", "Umbral", 20, 0.40f),
-                ("Withered Heart", "The epicenter of the Blight", "None", 40, 0.80f)
+                (name: "Greenreach Valley",   biome: "Temperate farmland / forest",       element: "Verdant", lvMin: 1,  lvMax: 10, hub: "Thornwall",         theme: "Loss, beginnings, the farming past",    blight: 0.05f),
+                (name: "The Ashen Steppe",    biome: "Scorched plains / dried riverbeds", element: "Pyro",    lvMin: 10, lvMax: 18, hub: "Dusthaven Outpost", theme: "Drought, survival",                     blight: 0.25f),
+                (name: "Gloomtide Marshes",   biome: "Swampland / bioluminescent fungi",  element: "Umbral",  lvMin: 16, lvMax: 24, hub: "Fenwick Village",   theme: "Decay, hidden beauty",                  blight: 0.40f),
+                (name: "Frosthollow Peaks",   biome: "Frozen mountains / alpine tundra",  element: "Cryo",    lvMin: 22, lvMax: 32, hub: "Ironpeak Fortress", theme: "Isolation, endurance",                  blight: 0.15f),
+                (name: "The Withered Heart",  biome: "Corrupted wasteland / twisted",     element: "None",    lvMin: 30, lvMax: 40, hub: "Varek's Sanctum",   theme: "Culmination, sacrifice",                blight: 0.80f),
+            };
+
+            // GDD 8.2 — Enemies per region: (name, level, category, tier, element)
+            var regionEnemies = new Dictionary<string, (string name, int level, string category, string tier, string element)[]>
+            {
+                ["Greenreach Valley"] = new[]
+                {
+                    ("Withered Wolf",      2,  "Withered Beast",   "Tier 1", "None"),
+                    ("Blight Beetle",      3,  "Blight Spawn",     "Tier 1", "Verdant"),
+                    ("Corrupted Farmhand", 5,  "Corrupted Human",  "Tier 2", "None"),
+                    ("Wither Stag",        8,  "Withered Beast",   "Elite",  "Verdant"),
+                },
+                ["The Ashen Steppe"] = new[]
+                {
+                    ("Dustcrawler",        11, "Withered Beast",   "Tier 1", "Pyro"),
+                    ("Scorched Viper",     13, "The Untamed",      "Tier 1", "Pyro"),
+                    ("Acolyte Ranger",     15, "Varek's Acolytes", "Tier 2", "None"),
+                    ("Ashwalker Golem",    17, "Constructs",       "Elite",  "Pyro"),
+                },
+                ["Gloomtide Marshes"] = new[]
+                {
+                    ("Bogfiend",           17, "Blight Spawn",     "Tier 1", "Umbral"),
+                    ("Sporecap Horror",    19, "Blight Spawn",     "Tier 1", "Verdant"),
+                    ("Drowned Sentinel",   21, "Corrupted Human",  "Tier 2", "Umbral"),
+                    ("The Mire Queen",     23, "Blight Spawn",     "Elite",  "Umbral"),
+                },
+                ["Frosthollow Peaks"] = new[]
+                {
+                    ("Frostwight",         23, "Withered Beast",   "Tier 1", "Cryo"),
+                    ("Glacial Construct",  26, "Constructs",       "Tier 1", "Cryo"),
+                    ("Acolyte Warder",     28, "Varek's Acolytes", "Tier 2", "None"),
+                    ("Avalanche Beast",    31, "Withered Beast",   "Elite",  "Cryo"),
+                },
+                ["The Withered Heart"] = new[]
+                {
+                    ("Hollow Shade",       32, "Blight Spawn",     "Tier 1", "None"),
+                    ("Rootwraith",         35, "Withered Beast",   "Tier 1", "Verdant"),
+                    ("Wither Knight",      37, "Corrupted Human",  "Tier 2", "None"),
+                    ("Blight Colossus",    39, "Blight Spawn",     "Elite",  "None"),
+                },
+            };
+
+            // GDD 9 — Bosses per region: (name, level, phases, mechanic, isOptional)
+            var regionBosses = new Dictionary<string, (string name, int level, int phases, string mechanic, bool optional)[]>
+            {
+                ["Greenreach Valley"] = new[]
+                {
+                    ("The Rootmother",     10, 2, "Vine traps; burn root nodes in P2",                  false),
+                    ("The Scarecrow King", 12, 2, "Decoy copies; real one identified by shadow",        true),
+                },
+                ["The Ashen Steppe"] = new[]
+                {
+                    ("Cindermaw",          18, 2, "Fire AoE shrinks arena; douse with water",           false),
+                    ("Oasis Phantom",      20, 2, "Mirage attacks; illusions vanish when approached",   true),
+                },
+                ["Gloomtide Marshes"] = new[]
+                {
+                    ("The Mire Sovereign", 24, 3, "Submerges; drain water via valves",                  false),
+                    ("Grandmother Spore",  26, 3, "Toxic clouds; wind mechanics for safe zones",        true),
+                },
+                ["Frosthollow Peaks"] = new[]
+                {
+                    ("Frostfang, the Bound", 32, 3, "Chained beast; breaking chains changes moveset",  false),
+                    ("The Frozen Accord",    34, 3, "Immune to magic P1, physical P2, vulnerable P3",   true),
+                },
+                ["The Withered Heart"] = new[]
+                {
+                    ("Varek Ashwood",      38, 3, "Mirrors player abilities",                           false),
+                    ("The Hollow Mother",  40, 3, "Reality-warping arena",                              true),
+                    ("Primordial Seed",    40, 3, "Secret boss — reality-warping arena",                true),
+                },
+            };
+
+            // GDD 6.1 — Exploration features: (harvest, restZone, hiddenGrove)
+            var regionExploration = new Dictionary<string, (string harvest, string restZone, string hiddenGrove)>
+            {
+                ["Greenreach Valley"]  = ("Herb patches, Ancient seeds",          "Thornwall Inn Clearing",       "Requires Root Sense — Eldergrove Hollow"),
+                ["The Ashen Steppe"]   = ("Fire minerals, Charred bark",          "Dusthaven Camp",              "Requires Flame Walk — Ember Hollow"),
+                ["Gloomtide Marshes"]  = ("Luminescent fungi, Swamp resin",       "Fenwick Lantern Rest",        "Requires Mire Sight — Glowspore Cavern"),
+                ["Frosthollow Peaks"]  = ("Froststone ore, Alpine lichen",        "Ironpeak Base Camp",          "Requires Frost Step — Crystal Grotto"),
+                ["The Withered Heart"] = ("Blightite shards, Withered essence",   "Sanctum Threshold",           "Requires Verdant Bloom — Heart's Memory"),
             };
 
             // Main storyline NPCs per region
             var regionNpcs = new Dictionary<string, (string name, string role)[]>
             {
-                ["Greenreach"] = new[]
+                ["Greenreach Valley"] = new[]
                 {
-                    ("Elder Mirren", "Village Elder — quest giver"),
-                    ("Healer Maren", "Village Healer — herbalist"),
+                    ("Elder Mirren",   "Village Elder — quest giver"),
+                    ("Healer Maren",   "Village Healer — herbalist"),
                     ("Captain Aldric", "Militia Captain — blight investigation"),
-                    ("Warden Sable", "Forest Warden — patrols the border")
+                    ("Warden Sable",   "Forest Warden — patrols the border"),
                 },
-                ["Ashen Steppe"] = new[]
+                ["The Ashen Steppe"] = new[]
                 {
                     ("Forgemaster Bram", "Guild Forgemaster — crafting master"),
-                    ("Watcher Sera", "Outpost Scout — tracks blight spread"),
-                    ("Lyra", "Forest Warden — memory fragments")
-                },
-                ["Frosthollow Peaks"] = new[]
-                {
-                    ("Scholar Veylin", "Blight Researcher — ancient texts"),
-                    ("Sentinel Kaelos", "Mountain Guardian — peak passage"),
-                    ("Thorne", "Wandering Sellsword — hired blade")
+                    ("Watcher Sera",     "Outpost Scout — tracks blight spread"),
+                    ("Lyra",             "Forest Warden — memory fragments"),
                 },
                 ["Gloomtide Marshes"] = new[]
                 {
-                    ("Oracle Nyx", "Marsh Seer — blight origin visions"),
-                    ("Ranger Theron", "Marsh Guide — safe passage"),
-                    ("Selene", "Moonlight Priestess — purification rites")
+                    ("Oracle Nyx",     "Marsh Seer — blight origin visions"),
+                    ("Ranger Theron",  "Marsh Guide — safe passage"),
+                    ("Selene",         "Moonlight Priestess — purification rites"),
                 },
-                ["Withered Heart"] = new[]
+                ["Frosthollow Peaks"] = new[]
+                {
+                    ("Scholar Veylin",   "Blight Researcher — ancient texts"),
+                    ("Sentinel Kaelos",  "Mountain Guardian — peak passage"),
+                    ("Thorne",           "Wandering Sellsword — hired blade"),
+                },
+                ["The Withered Heart"] = new[]
                 {
                     ("The Blightcaller", "Source of the corruption"),
-                    ("Eldara", "Spirit of the Verdant — ancient guardian"),
-                    ("Echo of Mirren", "Spectral guide — final trial")
-                }
+                    ("Eldara",           "Spirit of the Verdant — ancient guardian"),
+                    ("Echo of Mirren",   "Spectral guide — final trial"),
+                },
+            };
+
+            // Category colors for enemy types
+            Color CategoryColor(string category) => category switch
+            {
+                "Withered Beast"   => new Color(0.6f, 0.3f, 0.15f),  // Dark brown
+                "Blight Spawn"     => new Color(0.5f, 0.8f, 0.2f),   // Sickly green
+                "Corrupted Human"  => new Color(0.7f, 0.5f, 0.7f),   // Muted purple
+                "The Untamed"      => new Color(0.8f, 0.7f, 0.4f),   // Tawny/natural
+                "Varek's Acolytes" => new Color(0.9f, 0.3f, 0.3f),   // Crimson
+                "Constructs"       => new Color(0.5f, 0.6f, 0.7f),   // Steel gray
+                _ => Color.white,
             };
 
             Color npcColor = new Color(0.85f, 0.75f, 1f);
             Color companionNpcColor = new Color(1f, 0.85f, 0.3f);
+            Color headerColor = new Color(0.95f, 0.85f, 0.5f);
+            Color dimColor = new Color(0.55f, 0.55f, 0.55f);
+            Color bossMainColor = RarityToColor(Rarity.Legendary);   // Gold
+            Color bossOptColor = RarityToColor(Rarity.Mythic);       // Mythic purple
 
             int row = 0;
-            foreach (var (name, desc, element, level, blight) in regions)
+            foreach (var r in regions)
             {
-                Color nameColor = blight > 0.5f ? new Color(0.8f, 0.3f, 0.3f) : new Color(0.5f, 1f, 0.5f);
-                AddRowLabel(content, $"  {name}   (Lv {level}+)   [{element}]", row, nameColor);
+                // Region header
+                Color nameColor = r.blight > 0.5f ? new Color(0.8f, 0.3f, 0.3f) : new Color(0.5f, 1f, 0.5f);
+                AddRowLabel(content, $"  {r.name}   (Lv {r.lvMin}-{r.lvMax})   [{r.element}]", row, nameColor);
                 row++;
-                AddRowLabel(content, $"    {desc}", row, new Color(0.7f, 0.7f, 0.7f));
+                AddRowLabel(content, $"    {r.biome}", row, new Color(0.7f, 0.7f, 0.7f));
+                row++;
+                AddRowLabel(content, $"    Hub: {r.hub}   |   Theme: {r.theme}", row, dimColor);
                 row++;
 
                 // Blight bar
                 int barWidth = 20;
-                int filled = Mathf.RoundToInt(blight * barWidth);
+                int filled = Mathf.RoundToInt(r.blight * barWidth);
                 string bar = "[" + new string('#', filled) + new string('-', barWidth - filled) + "]";
-                Color blightColor = Color.Lerp(new Color(0.3f, 0.8f, 0.3f), new Color(0.9f, 0.2f, 0.2f), blight);
-                AddRowLabel(content, $"    Blight: {bar} {blight * 100:F0}%", row, blightColor);
+                Color blightColor = Color.Lerp(new Color(0.3f, 0.8f, 0.3f), new Color(0.9f, 0.2f, 0.2f), r.blight);
+                AddRowLabel(content, $"    Blight: {bar} {r.blight * 100:F0}%", row, blightColor);
                 row++;
 
-                // NPCs in this region
-                if (regionNpcs.TryGetValue(name, out var npcs))
+                AddRowLabel(content, "", row, Color.white); row++;
+
+                // --- Enemies ---
+                if (regionEnemies.TryGetValue(r.name, out var enemies))
                 {
+                    AddRowLabel(content, "    --- Enemies ---", row, headerColor); row++;
+                    foreach (var (eName, eLv, eCat, eTier, eElem) in enemies)
+                    {
+                        Color enemyColor = CategoryColor(eCat);
+                        if (eTier == "Elite") enemyColor = Color.Lerp(enemyColor, Color.white, 0.3f);
+                        string elemTag = eElem != "None" ? $"  [{eElem}]" : "";
+                        AddRowLabel(content, $"    [{eTier}] {eName} (Lv {eLv})       {eCat}{elemTag}", row, enemyColor);
+                        row++;
+                    }
+                    AddRowLabel(content, "", row, Color.white); row++;
+                }
+
+                // --- Bosses ---
+                if (regionBosses.TryGetValue(r.name, out var bosses))
+                {
+                    AddRowLabel(content, "    --- Bosses ---", row, headerColor); row++;
+                    foreach (var (bName, bLv, bPhases, bMech, bOpt) in bosses)
+                    {
+                        Color bColor = bOpt ? bossOptColor : bossMainColor;
+                        string tag = bOpt ? "[Optional]" : "[Main]";
+                        AddRowLabel(content, $"    {tag}  {bName} (Lv {bLv})  {bPhases} Phases — {bMech}", row, bColor);
+                        row++;
+                    }
+                    AddRowLabel(content, "", row, Color.white); row++;
+                }
+
+                // --- Exploration ---
+                if (regionExploration.TryGetValue(r.name, out var explore))
+                {
+                    AddRowLabel(content, "    --- Exploration ---", row, headerColor); row++;
+                    AddRowLabel(content, $"    Harvest: {explore.harvest}", row, new Color(0.6f, 0.85f, 0.5f)); row++;
+                    AddRowLabel(content, $"    Rest Zone: {explore.restZone}", row, new Color(0.7f, 0.8f, 1f)); row++;
+                    AddRowLabel(content, $"    Hidden Grove: {explore.hiddenGrove}", row, new Color(0.9f, 0.7f, 1f)); row++;
+                    AddRowLabel(content, "", row, Color.white); row++;
+                }
+
+                // --- NPCs ---
+                if (regionNpcs.TryGetValue(r.name, out var npcs))
+                {
+                    AddRowLabel(content, "    --- NPCs ---", row, headerColor); row++;
                     foreach (var (npcName, npcRole) in npcs)
                     {
                         bool isCompanion = npcName == "Lyra" || npcName == "Thorne"
@@ -1327,8 +1470,10 @@ namespace SoR.Testing
                     }
                 }
 
-                AddRowLabel(content, "", row, Color.white);
-                row++;
+                // Spacer between regions
+                AddRowLabel(content, "", row, Color.white); row++;
+                AddRowLabel(content, "  ────────────────────────────────────────────", row, dimColor); row++;
+                AddRowLabel(content, "", row, Color.white); row++;
             }
 
             SetContentHeight(content, row);
@@ -1930,6 +2075,28 @@ namespace SoR.Testing
                 Debug.Log("[Cheat] Pity set to 89");
                 CloseActiveScreen(); ShowCheatMenu();
             }); row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- ENEMIES ----
+            AddRowLabel(content, "  --- Enemies ---", row, headerColor); row++;
+
+            if (_sceneSetup != null)
+            {
+                AddRowLabel(content, "  Kill All Enemies", row, cheatColor);
+                AddButton(content, "Kill All", row, () =>
+                {
+                    _sceneSetup.KillAllEnemies();
+                    CloseActiveScreen(); ShowCheatMenu();
+                }); row++;
+
+                AddRowLabel(content, "  Respawn All Enemies (full HP)", row, cheatColor);
+                AddButton(content, "Respawn", row, () =>
+                {
+                    _sceneSetup.RespawnAllEnemies();
+                    CloseActiveScreen(); ShowCheatMenu();
+                }); row++;
+            }
 
             SetContentHeight(content, row);
         }
