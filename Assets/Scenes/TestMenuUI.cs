@@ -73,6 +73,10 @@ namespace SoR.Testing
         private string _partyActiveId;
         private string _partySupportId;
 
+        // ---- companion leveling ----
+        private readonly Dictionary<string, int> _companionLevels = new(); // companionId → level (1-45)
+        private int _playerLevel = 1;
+
         private void Start()
         {
             _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -846,7 +850,8 @@ namespace SoR.Testing
             {
                 int idx = System.Array.IndexOf(companionIds, id);
                 if (idx < 0) return id;
-                return $"{RarityStars(rarities[idx])} {FormatItemName(id)}   {elements[idx]}  {classes[idx]}";
+                int lvl = GetCompanionLevel(id);
+                return $"{RarityStars(rarities[idx])} {FormatItemName(id)}   {elements[idx]}  {classes[idx]}  Lv {lvl}";
             }
 
             // --- A) Party slots header (top 20% of panel) ---
@@ -861,7 +866,7 @@ namespace SoR.Testing
             if (_partyActiveId != null)
                 AddButton(headerContent, "Remove", 0, () => {
                     _partyActiveId = null;
-                    if (_sceneSetup != null) _sceneSetup.SetPartyCompanion("Active", null);
+                    if (_sceneSetup != null) _sceneSetup.SetPartyCompanion("Active", null, 1);
                     CloseActiveScreen(); ShowCompanions();
                 });
 
@@ -874,7 +879,7 @@ namespace SoR.Testing
             if (_partySupportId != null)
                 AddButton(headerContent, "Remove", 1, () => {
                     _partySupportId = null;
-                    if (_sceneSetup != null) _sceneSetup.SetPartyCompanion("Support", null);
+                    if (_sceneSetup != null) _sceneSetup.SetPartyCompanion("Support", null, 1);
                     CloseActiveScreen(); ShowCompanions();
                 });
 
@@ -883,8 +888,8 @@ namespace SoR.Testing
                 _partyActiveId = null; _partySupportId = null;
                 if (_sceneSetup != null)
                 {
-                    _sceneSetup.SetPartyCompanion("Active", null);
-                    _sceneSetup.SetPartyCompanion("Support", null);
+                    _sceneSetup.SetPartyCompanion("Active", null, 1);
+                    _sceneSetup.SetPartyCompanion("Support", null, 1);
                 }
                 CloseActiveScreen(); ShowCompanions();
             });
@@ -900,6 +905,7 @@ namespace SoR.Testing
                 string cId = companionIds[i];
                 bool owned = IsCompanionOwned(cId);
                 string star = RarityStars(rarities[i]);
+                int lvl = GetCompanionLevel(cId);
                 Color color = owned ? RarityToColor(rarities[i]) : new Color(0.3f, 0.3f, 0.3f);
 
                 if (!owned)
@@ -909,19 +915,25 @@ namespace SoR.Testing
                 }
                 else if (cId == _partyActiveId)
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  [ACTIVE]";
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  Lv {lvl}  [ACTIVE]";
                     AddRowLabel(content, line, row, color);
+                    string capturedId = cId;
+                    AddUpgradeButton(content, row, capturedId);
                 }
                 else if (cId == _partySupportId)
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  [SUPPORT]";
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  Lv {lvl}  [SUPPORT]";
                     AddRowLabel(content, line, row, color);
+                    string capturedId = cId;
+                    AddUpgradeButton(content, row, capturedId);
                 }
                 else
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}";
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  Lv {lvl}";
                     AddRowLabel(content, line, row, color);
                     string capturedId = cId;
+                    // Upgrade button at a fixed position (left of Active/Support)
+                    AddUpgradeButton(content, row, capturedId);
                     AddDualButtons(content, row,
                         "Active", () =>
                         {
@@ -929,8 +941,8 @@ namespace SoR.Testing
                             _partyActiveId = capturedId;
                             if (_sceneSetup != null)
                             {
-                                _sceneSetup.SetPartyCompanion("Support", _partySupportId);
-                                _sceneSetup.SetPartyCompanion("Active", _partyActiveId);
+                                _sceneSetup.SetPartyCompanion("Support", _partySupportId, GetCompanionLevel(_partySupportId));
+                                _sceneSetup.SetPartyCompanion("Active", _partyActiveId, GetCompanionLevel(_partyActiveId));
                             }
                             CloseActiveScreen(); ShowCompanions();
                         },
@@ -940,14 +952,289 @@ namespace SoR.Testing
                             _partySupportId = capturedId;
                             if (_sceneSetup != null)
                             {
-                                _sceneSetup.SetPartyCompanion("Active", _partyActiveId);
-                                _sceneSetup.SetPartyCompanion("Support", _partySupportId);
+                                _sceneSetup.SetPartyCompanion("Active", _partyActiveId, GetCompanionLevel(_partyActiveId));
+                                _sceneSetup.SetPartyCompanion("Support", _partySupportId, GetCompanionLevel(_partySupportId));
                             }
                             CloseActiveScreen(); ShowCompanions();
                         });
                 }
                 row++;
             }
+
+            SetContentHeight(content, row);
+        }
+
+        private void AddUpgradeButton(Transform content, int row, string companionId)
+        {
+            // Place upgrade button to the left of the dual buttons area
+            var go = new GameObject("Btn_Upgrade");
+            go.transform.SetParent(content, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(-15f - 70f - 4f - 70f - 4f, -row * 28f);
+            rt.sizeDelta = new Vector2(70f, 26f);
+
+            var img = go.AddComponent<Image>();
+            img.color = new Color(0.45f, 0.3f, 0.15f);
+
+            var btn = go.AddComponent<Button>();
+            btn.targetGraphic = img;
+            string capturedId = companionId;
+            btn.onClick.AddListener(() => { CloseActiveScreen(); ShowCompanionUpgrade(capturedId); });
+
+            var textGo = new GameObject("Text");
+            textGo.transform.SetParent(go.transform, false);
+            var t = textGo.AddComponent<Text>();
+            t.text = "Upgrade";
+            t.font = _font;
+            t.fontSize = 12;
+            t.color = Color.white;
+            t.alignment = TextAnchor.MiddleCenter;
+            var tRt = textGo.GetComponent<RectTransform>();
+            tRt.anchorMin = Vector2.zero;
+            tRt.anchorMax = Vector2.one;
+            tRt.offsetMin = Vector2.zero;
+            tRt.offsetMax = Vector2.zero;
+        }
+
+        // ================================================================
+        // COMPANION UPGRADE SCREEN
+        // ================================================================
+
+        private void ShowCompanionUpgrade(string companionId)
+        {
+            string[] companionIds = {
+                "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
+                "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
+                "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
+            };
+            Rarity[] rarities = {
+                Rarity.Common, Rarity.Common, Rarity.Common, Rarity.Common,
+                Rarity.Rare, Rarity.Rare, Rarity.Rare, Rarity.Rare,
+                Rarity.Legendary, Rarity.Legendary, Rarity.Legendary, Rarity.Mythic
+            };
+            string[] elements = {
+                "None", "Verdant", "Volt", "Hydro",
+                "Geo", "Pyro", "Verdant", "Hydro",
+                "Verdant", "Umbral", "Cryo", "Pyro"
+            };
+            string[] classes = {
+                "Swordsman", "Guardian", "Archer", "Mage",
+                "Guardian", "Mage", "Archer", "Healer",
+                "Archer", "Necromancer", "Assassin", "Summoner"
+            };
+
+            int idx = System.Array.IndexOf(companionIds, companionId);
+            string displayName = FormatItemName(companionId);
+            Rarity rarity = idx >= 0 ? rarities[idx] : Rarity.Common;
+            string element = idx >= 0 ? elements[idx] : "None";
+            string cls = idx >= 0 ? classes[idx] : "Unknown";
+            string stars = RarityStars(rarity);
+
+            int currentLevel = GetCompanionLevel(companionId);
+            bool isMaxLevel = currentLevel >= 45;
+
+            var panel = CreateScreenPanel($"Upgrade: {displayName}");
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
+
+            int row = 0;
+
+            // Row 1: Name / Rarity / Element / Class
+            AddRowLabel(content, $"  {stars} {displayName}   {element}  {cls}", row, RarityToColor(rarity));
+            row++;
+
+            // Row 2: Current Level
+            AddRowLabel(content, $"  Level: {currentLevel} / 45", row, Color.white);
+            row++;
+
+            // Row 3: Player Level
+            if (!isMaxLevel)
+            {
+                int targetLevel = currentLevel + 1;
+                string plvlNote = _playerLevel >= targetLevel ? "" : $"  (need Lv {targetLevel} for next)";
+                AddRowLabel(content, $"  Player Level: {_playerLevel}{plvlNote}", row,
+                    _playerLevel >= targetLevel ? Color.white : new Color(1f, 0.4f, 0.4f));
+            }
+            else
+            {
+                AddRowLabel(content, $"  Player Level: {_playerLevel}  (MAX LEVEL)", row, new Color(0.4f, 1f, 0.4f));
+            }
+            row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            if (!isMaxLevel)
+            {
+                int nextLevel = currentLevel + 1;
+
+                // Stats at current → next
+                float curDmg = TestSceneSetup.GetScaledDamage(companionId, currentLevel);
+                float nextDmg = TestSceneSetup.GetScaledDamage(companionId, nextLevel);
+                float curCd = TestSceneSetup.GetScaledCooldown(currentLevel);
+                float nextCd = TestSceneSetup.GetScaledCooldown(nextLevel);
+                float curSpd = TestSceneSetup.GetScaledMoveSpeed(currentLevel);
+                float nextSpd = TestSceneSetup.GetScaledMoveSpeed(nextLevel);
+
+                AddRowLabel(content, $"  --- Stats at Level {currentLevel} -> {nextLevel} ---", row,
+                    new Color(0.95f, 0.85f, 0.5f));
+                row++;
+                AddRowLabel(content, $"  Damage:   {curDmg:F1} -> {nextDmg:F1}", row, Color.white); row++;
+                AddRowLabel(content, $"  Cooldown: {curCd:F2}s -> {nextCd:F2}s", row, Color.white); row++;
+                AddRowLabel(content, $"  Speed:    {curSpd:F2} -> {nextSpd:F2}", row, Color.white); row++;
+
+                // Stat block comparison
+                var curStats = TestSceneSetup.GetCompanionStatBlock(companionId, currentLevel);
+                var nextStats = TestSceneSetup.GetCompanionStatBlock(companionId, nextLevel);
+                AddRowLabel(content, $"  VIG {curStats.Vigor:F0} -> {nextStats.Vigor:F0}  STR {curStats.Strength:F0} -> {nextStats.Strength:F0}  HAR {curStats.Harvest:F0} -> {nextStats.Harvest:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+                AddRowLabel(content, $"  VER {curStats.Verdance:F0} -> {nextStats.Verdance:F0}  AGI {curStats.Agility:F0} -> {nextStats.Agility:F0}  RES {curStats.Resilience:F0} -> {nextStats.Resilience:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+
+                AddRowLabel(content, "", row, Color.white); row++;
+
+                // Cost
+                var cost = GetUpgradeCost(currentLevel, rarity);
+                AddRowLabel(content, "  --- Cost ---", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+
+                bool goldOk = _gold >= cost.Gold;
+                AddRowLabel(content, $"  Gold: {cost.Gold}  (have: {_gold}) {(goldOk ? "OK" : "X")}",
+                    row, goldOk ? Color.white : new Color(1f, 0.4f, 0.4f)); row++;
+
+                bool essOk = _accordEssence >= cost.Essence;
+                AddRowLabel(content, $"  Essence: {cost.Essence}  (have: {_accordEssence}) {(essOk ? "OK" : "X")}",
+                    row, essOk ? Color.white : new Color(1f, 0.4f, 0.4f)); row++;
+
+                int matOwned = _inventory.GetItemCount(cost.MaterialId);
+                bool matOk = matOwned >= cost.MaterialCount;
+                AddRowLabel(content, $"  {cost.MaterialId} x{cost.MaterialCount}  (have: {matOwned}) {(matOk ? "OK" : "X")}",
+                    row, matOk ? Color.white : new Color(1f, 0.4f, 0.4f)); row++;
+
+                AddRowLabel(content, "", row, Color.white); row++;
+
+                // Level Up button
+                bool canUpgrade = goldOk && essOk && matOk && _playerLevel >= nextLevel;
+                string capturedId = companionId;
+
+                var lvlUpGo = new GameObject("Btn_LevelUp");
+                lvlUpGo.transform.SetParent(content, false);
+                var lvlRt = lvlUpGo.AddComponent<RectTransform>();
+                lvlRt.anchorMin = new Vector2(0f, 1f);
+                lvlRt.anchorMax = new Vector2(0f, 1f);
+                lvlRt.pivot = new Vector2(0f, 1f);
+                lvlRt.anchoredPosition = new Vector2(20f, -row * 28f);
+                lvlRt.sizeDelta = new Vector2(100f, 28f);
+                var lvlImg = lvlUpGo.AddComponent<Image>();
+                lvlImg.color = canUpgrade ? new Color(0.2f, 0.5f, 0.2f) : new Color(0.3f, 0.3f, 0.3f);
+                var lvlBtn = lvlUpGo.AddComponent<Button>();
+                lvlBtn.targetGraphic = lvlImg;
+                lvlBtn.interactable = canUpgrade;
+                lvlBtn.onClick.AddListener(() =>
+                {
+                    DoUpgrade(capturedId);
+                    CloseActiveScreen();
+                    ShowCompanionUpgrade(capturedId);
+                });
+                var lvlTextGo = new GameObject("Text");
+                lvlTextGo.transform.SetParent(lvlUpGo.transform, false);
+                var lvlT = lvlTextGo.AddComponent<Text>();
+                lvlT.text = "Level Up";
+                lvlT.font = _font;
+                lvlT.fontSize = 14;
+                lvlT.color = Color.white;
+                lvlT.alignment = TextAnchor.MiddleCenter;
+                var lvlTRt = lvlTextGo.GetComponent<RectTransform>();
+                lvlTRt.anchorMin = Vector2.zero;
+                lvlTRt.anchorMax = Vector2.one;
+                lvlTRt.offsetMin = Vector2.zero;
+                lvlTRt.offsetMax = Vector2.zero;
+
+                // Max Level button
+                var maxGo = new GameObject("Btn_MaxLevel");
+                maxGo.transform.SetParent(content, false);
+                var maxRt = maxGo.AddComponent<RectTransform>();
+                maxRt.anchorMin = new Vector2(0f, 1f);
+                maxRt.anchorMax = new Vector2(0f, 1f);
+                maxRt.pivot = new Vector2(0f, 1f);
+                maxRt.anchoredPosition = new Vector2(130f, -row * 28f);
+                maxRt.sizeDelta = new Vector2(100f, 28f);
+                var maxImg = maxGo.AddComponent<Image>();
+                maxImg.color = canUpgrade ? new Color(0.45f, 0.3f, 0.15f) : new Color(0.3f, 0.3f, 0.3f);
+                var maxBtn = maxGo.AddComponent<Button>();
+                maxBtn.targetGraphic = maxImg;
+                maxBtn.interactable = canUpgrade;
+                maxBtn.onClick.AddListener(() =>
+                {
+                    // Level up as many times as affordable
+                    for (int loop = 0; loop < 44; loop++)
+                    {
+                        int cl = GetCompanionLevel(capturedId);
+                        if (cl >= 45) break;
+                        int tl = cl + 1;
+                        if (_playerLevel < tl) break;
+                        var c = GetUpgradeCost(cl, GetCompanionRarity(capturedId));
+                        if (_gold < c.Gold || _accordEssence < c.Essence || !_inventory.HasItem(c.MaterialId, c.MaterialCount)) break;
+                        DoUpgrade(capturedId);
+                    }
+                    CloseActiveScreen();
+                    ShowCompanionUpgrade(capturedId);
+                });
+                var maxTextGo = new GameObject("Text");
+                maxTextGo.transform.SetParent(maxGo.transform, false);
+                var maxT = maxTextGo.AddComponent<Text>();
+                maxT.text = "Max Level";
+                maxT.font = _font;
+                maxT.fontSize = 14;
+                maxT.color = Color.white;
+                maxT.alignment = TextAnchor.MiddleCenter;
+                var maxTRt = maxTextGo.GetComponent<RectTransform>();
+                maxTRt.anchorMin = Vector2.zero;
+                maxTRt.anchorMax = Vector2.one;
+                maxTRt.offsetMin = Vector2.zero;
+                maxTRt.offsetMax = Vector2.zero;
+
+                row++;
+
+                // Status text
+                if (!canUpgrade)
+                {
+                    string reason = _playerLevel < nextLevel ? $"Need player level {nextLevel}"
+                        : !goldOk ? "Not enough gold"
+                        : !essOk ? "Not enough essence"
+                        : "Not enough materials";
+                    AddRowLabel(content, $"  {reason}", row, new Color(1f, 0.4f, 0.4f));
+                    row++;
+                }
+            }
+            else
+            {
+                AddRowLabel(content, "  --- MAX LEVEL REACHED ---", row, new Color(0.4f, 1f, 0.4f)); row++;
+
+                // Show current stats
+                float curDmg = TestSceneSetup.GetScaledDamage(companionId, 45);
+                float curCd = TestSceneSetup.GetScaledCooldown(45);
+                float curSpd = TestSceneSetup.GetScaledMoveSpeed(45);
+                AddRowLabel(content, $"  Damage: {curDmg:F1}   Cooldown: {curCd:F2}s   Speed: {curSpd:F2}", row, Color.white); row++;
+
+                var stats = TestSceneSetup.GetCompanionStatBlock(companionId, 45);
+                AddRowLabel(content, $"  VIG {stats.Vigor:F0}  STR {stats.Strength:F0}  HAR {stats.Harvest:F0}  VER {stats.Verdance:F0}  AGI {stats.Agility:F0}  RES {stats.Resilience:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+            }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // Party Buff info
+            if (rarity == Rarity.Mythic)
+                AddRowLabel(content, "  Party Buff: +10% Player Damage (Mythic)", row, new Color(1f, 0.5f, 1f));
+            else if (rarity == Rarity.Legendary)
+                AddRowLabel(content, "  Party Buff: -0.1s Cooldown Reduction (Legendary)", row, new Color(1f, 0.85f, 0.3f));
+            else
+                AddRowLabel(content, "  Party Buff: (none — Rare/Common)", row, new Color(0.5f, 0.5f, 0.5f));
+            row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // Back button
+            AddButton(content, "Back", row, () => { CloseActiveScreen(); ShowCompanions(); });
+            row++;
 
             SetContentHeight(content, row);
         }
@@ -1528,6 +1815,52 @@ namespace SoR.Testing
 
             AddRowLabel(content, "", row, Color.white); row++;
 
+            // ---- COMPANION LEVELS ----
+            AddRowLabel(content, "  --- Companion Levels ---", row, headerColor); row++;
+
+            AddRowLabel(content, $"  Player Level: {_playerLevel}", row, cheatColor);
+            AddCheatValueButtons(content, row, new[] { 1f, 15f, 30f, 45f }, v =>
+            {
+                _playerLevel = (int)v;
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Level all companions to max (45)", row, cheatColor);
+            AddButton(content, "Max All", row, () =>
+            {
+                string[] allCompanions = {
+                    "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
+                    "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
+                    "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
+                };
+                foreach (var id in allCompanions)
+                    _companionLevels[id] = 45;
+                // Respawn active companions at new level
+                if (_sceneSetup != null)
+                {
+                    if (_partyActiveId != null) _sceneSetup.SetPartyCompanion("Active", _partyActiveId, 45);
+                    if (_partySupportId != null) _sceneSetup.SetPartyCompanion("Support", _partySupportId, 45);
+                }
+                Debug.Log("[Cheat] All companions set to Lv 45");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Reset all companions to Lv 1", row, new Color(1f, 0.3f, 0.3f));
+            AddButton(content, "Reset", row, () =>
+            {
+                _companionLevels.Clear();
+                // Respawn active companions at level 1
+                if (_sceneSetup != null)
+                {
+                    if (_partyActiveId != null) _sceneSetup.SetPartyCompanion("Active", _partyActiveId, 1);
+                    if (_partySupportId != null) _sceneSetup.SetPartyCompanion("Support", _partySupportId, 1);
+                }
+                Debug.Log("[Cheat] All companions reset to Lv 1");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
             // ---- CRAFTING ----
             AddRowLabel(content, "  --- Crafting Levels ---", row, headerColor); row++;
 
@@ -1962,6 +2295,99 @@ namespace SoR.Testing
                     return true;
             }
             return false;
+        }
+
+        // ================================================================
+        // Companion leveling helpers
+        // ================================================================
+
+        private int GetCompanionLevel(string id) => _companionLevels.GetValueOrDefault(id, 1);
+
+        private struct UpgradeCost
+        {
+            public int Gold;
+            public int Essence;
+            public string MaterialId;
+            public int MaterialCount;
+        }
+
+        private static UpgradeCost GetUpgradeCost(int currentLevel, Rarity rarity)
+        {
+            float rarityMult = rarity switch
+            {
+                Rarity.Common => 1f,
+                Rarity.Rare => 1.5f,
+                Rarity.Legendary => 2f,
+                Rarity.Mythic => 3f,
+                _ => 1f
+            };
+
+            int gold = Mathf.RoundToInt(currentLevel * 100 * rarityMult);
+            int essence = Mathf.RoundToInt(currentLevel * 5 * rarityMult);
+
+            string materialId;
+            int materialCount;
+            if (currentLevel <= 10)
+            {
+                materialId = "herb_bundle";
+                materialCount = 1 + currentLevel / 5;
+            }
+            else if (currentLevel <= 20)
+            {
+                materialId = "iron_ore";
+                materialCount = 1 + (currentLevel - 10) / 5;
+            }
+            else if (currentLevel <= 30)
+            {
+                materialId = "fire_crystal";
+                materialCount = 1 + (currentLevel - 20) / 5;
+            }
+            else if (currentLevel <= 40)
+            {
+                materialId = "runic_dust";
+                materialCount = 1 + (currentLevel - 30) / 5;
+            }
+            else
+            {
+                materialId = "moonstone";
+                materialCount = 1 + (currentLevel - 40) / 5;
+            }
+
+            return new UpgradeCost { Gold = gold, Essence = essence, MaterialId = materialId, MaterialCount = materialCount };
+        }
+
+        private void DoUpgrade(string companionId)
+        {
+            int currentLevel = GetCompanionLevel(companionId);
+            if (currentLevel >= 45) return;
+
+            int targetLevel = currentLevel + 1;
+            if (_playerLevel < targetLevel)
+            {
+                Debug.Log($"[Upgrade] Need player level {targetLevel}");
+                return;
+            }
+
+            Rarity rarity = GetCompanionRarity(companionId);
+            var cost = GetUpgradeCost(currentLevel, rarity);
+
+            if (_gold < cost.Gold) { Debug.Log("[Upgrade] Not enough gold"); return; }
+            if (_accordEssence < cost.Essence) { Debug.Log("[Upgrade] Not enough essence"); return; }
+            if (!_inventory.HasItem(cost.MaterialId, cost.MaterialCount)) { Debug.Log("[Upgrade] Not enough materials"); return; }
+
+            _gold -= cost.Gold;
+            _accordEssence -= cost.Essence;
+            _inventory.RemoveItem(cost.MaterialId, cost.MaterialCount);
+            _companionLevels[companionId] = targetLevel;
+
+            // Respawn active companions at new level
+            if (_sceneSetup != null)
+            {
+                if (companionId == _partyActiveId)
+                    _sceneSetup.SetPartyCompanion("Active", companionId, targetLevel);
+                if (companionId == _partySupportId)
+                    _sceneSetup.SetPartyCompanion("Support", companionId, targetLevel);
+            }
         }
 
         // ================================================================

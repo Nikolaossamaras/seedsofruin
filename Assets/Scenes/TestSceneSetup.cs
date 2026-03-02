@@ -72,9 +72,17 @@ namespace SoR.Testing
         {
             public string CompanionId;
             public string Slot;
+            public int Level;
             public GameObject Root;
             public TestCompanionBehavior Behavior;
         }
+
+        // ---- party passive buffs ----
+        private float _partyDamageBonus = 1f;     // multiplier (1.0 = no bonus)
+        private float _partyCooldownReduction = 0f; // seconds
+
+        public float PartyDamageBonus => _partyDamageBonus;
+        public float PartyCooldownReduction => _partyCooldownReduction;
 
         // ================================================================
         // Lifecycle
@@ -616,7 +624,7 @@ namespace SoR.Testing
                 if (_hitThisSwing.Contains(id)) continue;
                 _hitThisSwing.Add(id);
 
-                float damageMultiplier = OneHitKill ? 9999f : 1f;
+                float damageMultiplier = OneHitKill ? 9999f : _partyDamageBonus;
                 combat.ProcessAttack(
                     _player,
                     ai.gameObject,
@@ -739,15 +747,17 @@ namespace SoR.Testing
         /// <summary>
         /// Called by TestMenuUI when the player assigns or removes a companion from a party slot.
         /// </summary>
-        public void SetPartyCompanion(string slot, string companionId)
+        public void SetPartyCompanion(string slot, string companionId, int level = 1)
         {
             DespawnCompanion(slot);
 
             if (!string.IsNullOrEmpty(companionId))
-                SpawnCompanion(slot, companionId);
+                SpawnCompanion(slot, companionId, level);
+
+            RecalculatePartyBuffs();
         }
 
-        private void SpawnCompanion(string slot, string companionId)
+        private void SpawnCompanion(string slot, string companionId, int level = 1)
         {
             // Offset: Active = left-behind, Support = right-behind
             Vector3 followOffset = slot == "Active"
@@ -813,6 +823,12 @@ namespace SoR.Testing
             behavior.FollowOffset = followOffset;
             behavior.Initialize(_player.transform, enemyAIs, animator);
 
+            // Apply level-scaled stats
+            behavior.AttackDamage = GetScaledDamage(companionId, level);
+            behavior.AttackCooldown = GetScaledCooldown(level);
+            behavior.MoveSpeed = GetScaledMoveSpeed(level);
+            behavior.DetectRange = 10f + level * 0.1f;
+
             // Wire attack callback
             string capturedId = companionId;
             behavior.OnAttackEnemy += (enemyAI) => OnCompanionAttackEnemy(root, capturedId, enemyAI);
@@ -821,6 +837,7 @@ namespace SoR.Testing
             {
                 CompanionId = companionId,
                 Slot = slot,
+                Level = level,
                 Root = root,
                 Behavior = behavior
             });
@@ -850,7 +867,18 @@ namespace SoR.Testing
             Element companionElement = GetCompanionElement(companionId);
             _companionWeapon.Element = companionElement;
 
-            StatBlock attackerStats = GetCompanionStatBlock(companionId);
+            // Look up companion entry to get level
+            int level = 1;
+            foreach (var entry in _companions)
+            {
+                if (entry.CompanionId == companionId && entry.Root == companionGo)
+                {
+                    level = entry.Level;
+                    break;
+                }
+            }
+
+            StatBlock attackerStats = GetCompanionStatBlock(companionId, level);
             StatBlock defenderStats = enemyAI.Definition != null ? enemyAI.Definition.BaseStats : default;
 
             combat.ProcessAttack(
@@ -874,7 +902,7 @@ namespace SoR.Testing
             return ElementToColor(GetCompanionElement(companionId));
         }
 
-        private static StatBlock GetCompanionStatBlock(string companionId)
+        public static StatBlock GetCompanionStatBlock(string companionId, int level = 1)
         {
             int idx = System.Array.IndexOf(CompanionIds, companionId);
             Rarity rarity = idx >= 0 ? CompanionRarities[idx] : Rarity.Common;
@@ -886,15 +914,76 @@ namespace SoR.Testing
                 _ => 2f // Legendary, Mythic
             };
 
+            float levelScale = 1f + (level - 1) * 0.04f;
+
             return new StatBlock
             {
-                Vigor = 8f * multiplier,
-                Strength = 12f * multiplier,
-                Harvest = 5f * multiplier,
-                Verdance = 8f * multiplier,
-                Agility = 8f * multiplier,
-                Resilience = 4f * multiplier
+                Vigor = 8f * multiplier * levelScale,
+                Strength = 12f * multiplier * levelScale,
+                Harvest = 5f * multiplier * levelScale,
+                Verdance = 8f * multiplier * levelScale,
+                Agility = 8f * multiplier * levelScale,
+                Resilience = 4f * multiplier * levelScale
             };
+        }
+
+        // ================================================================
+        // Level-scaling helpers (public static for UI access)
+        // ================================================================
+
+        private static float RarityMultiplier(string companionId)
+        {
+            int idx = System.Array.IndexOf(CompanionIds, companionId);
+            Rarity rarity = idx >= 0 ? CompanionRarities[idx] : Rarity.Common;
+            return rarity switch
+            {
+                Rarity.Common => 1f,
+                Rarity.Rare => 1.5f,
+                Rarity.Legendary => 2f,
+                Rarity.Mythic => 2f,
+                _ => 1f
+            };
+        }
+
+        public static float GetScaledDamage(string companionId, int level)
+        {
+            return 25f * RarityMultiplier(companionId) * (1f + (level - 1) * 0.04f);
+        }
+
+        public static float GetScaledCooldown(int level)
+        {
+            return Mathf.Max(0.5f, 2f - (level - 1) * 0.025f);
+        }
+
+        public static float GetScaledMoveSpeed(int level)
+        {
+            return 5f + (level - 1) * 0.05f;
+        }
+
+        // ================================================================
+        // Party passive buff system
+        // ================================================================
+
+        private void RecalculatePartyBuffs()
+        {
+            _partyDamageBonus = 1f;
+            _partyCooldownReduction = 0f;
+
+            foreach (var entry in _companions)
+            {
+                int idx = System.Array.IndexOf(CompanionIds, entry.CompanionId);
+                if (idx < 0) continue;
+                Rarity rarity = CompanionRarities[idx];
+
+                if (rarity == Rarity.Mythic)
+                    _partyDamageBonus += 0.10f;
+                if (rarity == Rarity.Legendary)
+                    _partyCooldownReduction += 0.1f;
+            }
+
+            // Apply cooldown reduction to weapon attack speed
+            if (_testWeapon != null)
+                _testWeapon.AttackSpeed = 1.2f + _partyCooldownReduction;
         }
 
         private static Color ElementToColor(Element e) => e switch
