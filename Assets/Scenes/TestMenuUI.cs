@@ -69,6 +69,10 @@ namespace SoR.Testing
         private TestSceneSetup _sceneSetup;
         private readonly HashSet<string> _unlockedCompanions = new();
 
+        // ---- party slots ----
+        private string _partyActiveId;
+        private string _partySupportId;
+
         private void Start()
         {
             _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -815,9 +819,7 @@ namespace SoR.Testing
         private void ShowCompanions()
         {
             var panel = CreateScreenPanel("Companion Roster");
-            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
 
-            // Show companions from gacha owned set (simple display)
             string[] companionIds = {
                 "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
                 "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
@@ -839,15 +841,85 @@ namespace SoR.Testing
                 "Archer", "Necromancer", "Assassin", "Summoner"
             };
 
+            // Helper to look up display info for a companion id
+            string CompanionLine(string id)
+            {
+                int idx = System.Array.IndexOf(companionIds, id);
+                if (idx < 0) return id;
+                return $"{RarityStars(rarities[idx])} {FormatItemName(id)}   {elements[idx]}  {classes[idx]}";
+            }
+
+            // --- A) Party slots header (top 20% of panel) ---
+            var headerContent = CreateScrollContent(panel.transform, new Vector2(0f, 0.78f), new Vector2(1f, 0.9f));
+
+            // Active slot
+            string activeLine = _partyActiveId != null
+                ? $"  Active:  {CompanionLine(_partyActiveId)}"
+                : "  Active:  (empty)";
+            Color activeColor = _partyActiveId != null ? Color.white : new Color(0.4f, 0.4f, 0.4f);
+            AddRowLabel(headerContent, activeLine, 0, activeColor);
+            if (_partyActiveId != null)
+                AddButton(headerContent, "Remove", 0, () => { _partyActiveId = null; CloseActiveScreen(); ShowCompanions(); });
+
+            // Support slot
+            string supportLine = _partySupportId != null
+                ? $"  Support: {CompanionLine(_partySupportId)}"
+                : "  Support: (empty)";
+            Color supportColor = _partySupportId != null ? Color.white : new Color(0.4f, 0.4f, 0.4f);
+            AddRowLabel(headerContent, supportLine, 1, supportColor);
+            if (_partySupportId != null)
+                AddButton(headerContent, "Remove", 1, () => { _partySupportId = null; CloseActiveScreen(); ShowCompanions(); });
+
+            // Clear Party button
+            AddButton(headerContent, "Clear Party", 2, () => { _partyActiveId = null; _partySupportId = null; CloseActiveScreen(); ShowCompanions(); });
+
+            SetContentHeight(headerContent, 3);
+
+            // --- B) Companion list (scrollable, below header) ---
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.77f));
+
             int row = 0;
             for (int i = 0; i < companionIds.Length; i++)
             {
-                bool owned = IsCompanionOwned(companionIds[i]);
+                string cId = companionIds[i];
+                bool owned = IsCompanionOwned(cId);
                 string star = RarityStars(rarities[i]);
                 Color color = owned ? RarityToColor(rarities[i]) : new Color(0.3f, 0.3f, 0.3f);
-                string status = owned ? "" : "  [LOCKED]";
-                string line = $"  {star} {FormatItemName(companionIds[i])}   {elements[i]}  {classes[i]}{status}";
-                AddRowLabel(content, line, row, color);
+
+                if (!owned)
+                {
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  [LOCKED]";
+                    AddRowLabel(content, line, row, color);
+                }
+                else if (cId == _partyActiveId)
+                {
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  [ACTIVE]";
+                    AddRowLabel(content, line, row, color);
+                }
+                else if (cId == _partySupportId)
+                {
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  [SUPPORT]";
+                    AddRowLabel(content, line, row, color);
+                }
+                else
+                {
+                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}";
+                    AddRowLabel(content, line, row, color);
+                    string capturedId = cId;
+                    AddDualButtons(content, row,
+                        "Active", () =>
+                        {
+                            if (_partySupportId == capturedId) _partySupportId = null;
+                            _partyActiveId = capturedId;
+                            CloseActiveScreen(); ShowCompanions();
+                        },
+                        "Support", () =>
+                        {
+                            if (_partyActiveId == capturedId) _partyActiveId = null;
+                            _partySupportId = capturedId;
+                            CloseActiveScreen(); ShowCompanions();
+                        });
+                }
                 row++;
             }
 
@@ -1666,6 +1738,52 @@ namespace SoR.Testing
             t.text = label;
             t.font = _font;
             t.fontSize = 14;
+            t.color = Color.white;
+            t.alignment = TextAnchor.MiddleCenter;
+            var tRt = textGo.GetComponent<RectTransform>();
+            tRt.anchorMin = Vector2.zero;
+            tRt.anchorMax = Vector2.one;
+            tRt.offsetMin = Vector2.zero;
+            tRt.offsetMax = Vector2.zero;
+        }
+
+        private void AddDualButtons(Transform content, int row,
+            string labelA, System.Action onClickA,
+            string labelB, System.Action onClickB)
+        {
+            float btnWidth = 70f;
+            float gap = 4f;
+
+            // Right button (Support)
+            CreateSmallButton(content, labelB, new Vector2(-15f, -row * 28f), btnWidth, onClickB);
+            // Left button (Active)
+            CreateSmallButton(content, labelA, new Vector2(-15f - btnWidth - gap, -row * 28f), btnWidth, onClickA);
+        }
+
+        private void CreateSmallButton(Transform content, string label, Vector2 pos, float width, System.Action onClick)
+        {
+            var go = new GameObject("Btn_" + label);
+            go.transform.SetParent(content, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = new Vector2(width, 26f);
+
+            var img = go.AddComponent<Image>();
+            img.color = new Color(0.2f, 0.35f, 0.5f);
+
+            var btn = go.AddComponent<Button>();
+            btn.targetGraphic = img;
+            btn.onClick.AddListener(() => onClick?.Invoke());
+
+            var textGo = new GameObject("Text");
+            textGo.transform.SetParent(go.transform, false);
+            var t = textGo.AddComponent<Text>();
+            t.text = label;
+            t.font = _font;
+            t.fontSize = 13;
             t.color = Color.white;
             t.alignment = TextAnchor.MiddleCenter;
             var tRt = textGo.GetComponent<RectTransform>();
