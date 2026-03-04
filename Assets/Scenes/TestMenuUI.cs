@@ -12,6 +12,7 @@ using SoR.Systems.Quests;
 using SoR.Gameplay;
 using SoR.UI;
 using UnityEngine.EventSystems;
+using SoR.Progression;
 
 namespace SoR.Testing
 {
@@ -23,7 +24,7 @@ namespace SoR.Testing
     ///   I = Inventory       C = Crafting      M = Map
     ///   G = Gacha           Q = Quest Log     K = Skills
     ///   P = Companions      E = NPC Shop / Equipment
-    ///   ESC = Close current screen
+    ///   T = Titles          ESC = Close current screen
     /// </summary>
     public class TestMenuUI : MonoBehaviour
     {
@@ -35,6 +36,9 @@ namespace SoR.Testing
         private ShopSystem _shop;
         private QuestManager _questManager;
 
+        private TitleSystem _titleSystem;
+        private readonly List<TitleDefinitionSO> _testTitles = new();
+
         // ---- UI root ----
         private Canvas _canvas;
         private Font _font;
@@ -44,7 +48,13 @@ namespace SoR.Testing
         private readonly Dictionary<KeyCode, System.Action> _screenKeys = new();
 
         // ---- test data ----
-        private BannerDefinitionSO _testBanner;
+        private readonly List<BannerDefinitionSO> _testBanners = new();
+        private int _gachaBannerIndex = 0;    // selected banner tab
+        private int _gachaSubScreen = 0;      // 0=Main, 1=Wish History, 2=Rate Details
+        private int _starseeds = 3200;        // summoning currency (~20 pulls)
+        private readonly List<(string companionId, Rarity rarity, bool isDuplicate, string bannerName, int pullNumber)> _wishHistory = new();
+        private const int StarseedCostSingle = 160;
+        private const int StarseedCost10Pull = 1440;  // 10% discount
         private readonly Dictionary<string, ShopInventorySO> _shopDefs = new();
         private readonly List<RecipeDefinitionSO> _testRecipes = new();
         private readonly List<QuestDefinitionSO> _testQuests = new();
@@ -94,6 +104,18 @@ namespace SoR.Testing
         private readonly HashSet<string> _ownedWeapons = new();
         private string _equippedWeaponId;
 
+        // ---- fog of war ----
+        private readonly HashSet<int> _revealedFogCells = new();
+        private readonly HashSet<string> _visitedRegions = new();
+        private const int FogGridRes = 20;
+        private const float FogCellSize = 10f;       // 200 / 20
+        private const float FogWorldMin = -100f;
+        private const float FogRevealRadius = 18f;
+        private RectTransform _mapBlipRt;
+        private RectTransform _mapGlowRt;
+        private Transform _mapFogLayer;
+        private int _mapRenderedFogCount;
+
         private void Start()
         {
             _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -123,6 +145,7 @@ namespace SoR.Testing
             _screenKeys[KeyCode.M] = ShowMap;
             _screenKeys[KeyCode.Q] = ShowQuestLog;
             _screenKeys[KeyCode.K] = ShowSkills;
+            _screenKeys[KeyCode.T] = ShowTitles;
             // E is handled specially in Update() (NPC shop vs Equipment)
             _screenKeys[KeyCode.BackQuote] = ShowCheatMenu;
 
@@ -133,6 +156,106 @@ namespace SoR.Testing
             // Quest objective tracker — bridges game events to QuestManager.UpdateObjective()
             var trackerGo = new GameObject("QuestObjectiveTracker");
             trackerGo.AddComponent<SoR.Systems.Quests.QuestObjectiveTracker>();
+        }
+
+        private void RevealFogAroundPlayer()
+        {
+            if (_sceneSetup == null || _sceneSetup.PlayerTransform == null) return;
+
+            Vector3 pPos = _sceneSetup.PlayerTransform.position;
+            float px = pPos.x;
+            float pz = pPos.z;
+
+            int centerCol = (int)((px - FogWorldMin) / FogCellSize);
+            int centerRow = (int)((pz - FogWorldMin) / FogCellSize);
+            int cellRadius = Mathf.CeilToInt(FogRevealRadius / FogCellSize);
+
+            for (int r = centerRow - cellRadius; r <= centerRow + cellRadius; r++)
+            {
+                for (int c = centerCol - cellRadius; c <= centerCol + cellRadius; c++)
+                {
+                    if (r < 0 || r >= FogGridRes || c < 0 || c >= FogGridRes) continue;
+
+                    // Cell center in world space
+                    float cellCx = FogWorldMin + (c + 0.5f) * FogCellSize;
+                    float cellCz = FogWorldMin + (r + 0.5f) * FogCellSize;
+                    float dx = px - cellCx;
+                    float dz = pz - cellCz;
+                    if (dx * dx + dz * dz <= FogRevealRadius * FogRevealRadius)
+                    {
+                        _revealedFogCells.Add(r * FogGridRes + c);
+                    }
+                }
+            }
+
+            // Track visited biome regions
+            var regionData = new[]
+            {
+                ("Greenreach Valley",   0f,   0f, 35f),
+                ("The Ashen Steppe",  -55f, -55f, 30f),
+                ("Gloomtide Marshes",  55f, -55f, 30f),
+                ("Frosthollow Peaks", -55f,  55f, 30f),
+                ("The Withered Heart", 55f,  55f, 30f),
+            };
+            foreach (var (name, cx, cz, half) in regionData)
+            {
+                if (px >= cx - half && px <= cx + half && pz >= cz - half && pz <= cz + half)
+                    _visitedRegions.Add(name);
+            }
+        }
+
+        private void RebuildFogLayer()
+        {
+            if (_mapFogLayer == null) return;
+
+            // Destroy existing fog tiles
+            for (int i = _mapFogLayer.childCount - 1; i >= 0; i--)
+                Destroy(_mapFogLayer.GetChild(i).gameObject);
+
+            _mapRenderedFogCount = _revealedFogCells.Count;
+
+            for (int fogRow = 0; fogRow < FogGridRes; fogRow++)
+            {
+                for (int fogCol = 0; fogCol < FogGridRes; fogCol++)
+                {
+                    int cellKey = fogRow * FogGridRes + fogCol;
+                    if (_revealedFogCells.Contains(cellKey)) continue;
+
+                    // Check if this cell is adjacent to any revealed cell (edge fog)
+                    bool isEdge = false;
+                    for (int dr = -1; dr <= 1 && !isEdge; dr++)
+                    {
+                        for (int dc = -1; dc <= 1 && !isEdge; dc++)
+                        {
+                            if (dr == 0 && dc == 0) continue;
+                            int nr = fogRow + dr;
+                            int nc = fogCol + dc;
+                            if (nr >= 0 && nr < FogGridRes && nc >= 0 && nc < FogGridRes)
+                            {
+                                if (_revealedFogCells.Contains(nr * FogGridRes + nc))
+                                    isEdge = true;
+                            }
+                        }
+                    }
+
+                    float ancMinX = fogCol / (float)FogGridRes;
+                    float ancMinY = fogRow / (float)FogGridRes;
+                    float ancMaxX = (fogCol + 1) / (float)FogGridRes;
+                    float ancMaxY = (fogRow + 1) / (float)FogGridRes;
+
+                    var fogGo = new GameObject("Fog");
+                    fogGo.transform.SetParent(_mapFogLayer, false);
+                    var fogRt = fogGo.AddComponent<RectTransform>();
+                    fogRt.anchorMin = new Vector2(ancMinX, ancMinY);
+                    fogRt.anchorMax = new Vector2(ancMaxX, ancMaxY);
+                    fogRt.offsetMin = Vector2.zero;
+                    fogRt.offsetMax = Vector2.zero;
+                    var fogImg = fogGo.AddComponent<Image>();
+                    float fogAlpha = isEdge ? 0.7f : 1f;
+                    fogImg.color = new Color(0.15f, 0.12f, 0.08f, fogAlpha);
+                    fogImg.raycastTarget = true;
+                }
+            }
         }
 
         private void Update()
@@ -150,6 +273,21 @@ namespace SoR.Testing
 
             // Update interaction prompt (always, even when a screen is open)
             UpdateInteractPrompt();
+
+            // Reveal fog cells around the player as they move
+            RevealFogAroundPlayer();
+
+            // Live-update map elements when the map screen is open
+            if (_mapBlipRt != null && _sceneSetup != null && _sceneSetup.PlayerTransform != null)
+            {
+                Vector3 pp = _sceneSetup.PlayerTransform.position;
+                Vector2 pm = new Vector2((pp.x + 100f) / 200f, (pp.z + 100f) / 200f);
+                _mapBlipRt.anchorMin = pm;
+                _mapBlipRt.anchorMax = pm;
+                if (_mapGlowRt != null) { _mapGlowRt.anchorMin = pm; _mapGlowRt.anchorMax = pm; }
+            }
+            if (_mapFogLayer != null && _revealedFogCells.Count != _mapRenderedFogCount)
+                RebuildFogLayer();
 
             // Only open screens when nothing is open (prevents accidental toggling)
             if (_activeScreen != null) return;
@@ -228,6 +366,8 @@ namespace SoR.Testing
 
             // Listen for essence
             EventBus.Subscribe<AccordEssenceGainedEvent>(e => _accordEssence += e.Amount);
+
+            _titleSystem = new TitleSystem();
         }
 
         // ================================================================
@@ -289,31 +429,111 @@ namespace SoR.Testing
             // --- Shops (all 6 GDD shops) ---
             SeedAllShops();
 
-            // --- Gacha Banner ---
+            // --- Gacha Banners (4 banners, GDD-compliant) ---
             var pityConfig = ScriptableObject.CreateInstance<PityConfigSO>();
-            pityConfig.LegendarySoftPity = 70;
-            pityConfig.LegendaryHardPity = 90;
-            pityConfig.MythicHardPity = 180;
-            pityConfig.SoftPityRateBoost = 0.05f;
+            pityConfig.LegendarySoftPity = 50;
+            pityConfig.LegendaryHardPity = 60;
+            pityConfig.MythicHardPity = 999; // disabled
+            pityConfig.SoftPityRateBoost = 0.06f;
 
-            _testBanner = ScriptableObject.CreateInstance<BannerDefinitionSO>();
-            _testBanner.BannerName = "Verdant Bloom";
-            _testBanner.BannerId = "verdant_bloom_01";
-            _testBanner.Description = "Featured: Lyra, the Forest Warden";
-            _testBanner.CommonRate = 0.80f;
-            _testBanner.RareRate = 0.15f;
-            _testBanner.LegendaryRate = 0.04f;
-            _testBanner.MythicRate = 0.01f;
-            _testBanner.PityConfig = pityConfig;
-            _testBanner.CommonPool = new List<string>
-                { "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice" };
-            _testBanner.RarePool = new List<string>
-                { "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest" };
-            _testBanner.LegendaryPool = new List<string>
-                { "companion_lyra", "companion_thorne", "companion_selene" };
-            _testBanner.MythicPool = new List<string> { "companion_eldara" };
-            _testBanner.FeaturedCompanionId = "companion_lyra";
-            _testBanner.FeaturedRarity = Rarity.Legendary;
+            // All 32 companion IDs by tier
+            var pool3Star = new List<string>
+            {
+                "companion_tomas", "companion_berta", "companion_pip", "companion_marsh",
+                "companion_willow", "companion_emmet", "companion_lira", "companion_bruno",
+                "companion_mira", "companion_sage"
+            };
+            var pool4Star = new List<string>
+            {
+                "companion_brynn", "companion_hale", "companion_nix", "companion_petra",
+                "companion_elara", "companion_fenwick", "companion_maeven", "companion_rook",
+                "companion_denna", "companion_cassius", "companion_wren", "companion_jareth"
+            };
+            var pool5Star = new List<string>
+            {
+                "companion_seraphine", "companion_korrath", "companion_yuki", "companion_theron",
+                "companion_lyssara", "companion_vex", "companion_orin", "companion_zara",
+                "companion_malachai", "companion_kaelen"
+            };
+
+            // Banner 1: Standard Verdant (no featured)
+            var standardBanner = ScriptableObject.CreateInstance<BannerDefinitionSO>();
+            standardBanner.BannerName = "Standard Verdant";
+            standardBanner.BannerId = "standard_verdant";
+            standardBanner.Description = "The standard summoning banner — all companions available.";
+            standardBanner.CommonRate = 0.85f;
+            standardBanner.RareRate = 0.12f;
+            standardBanner.LegendaryRate = 0.03f;
+            standardBanner.MythicRate = 0f;
+            standardBanner.PityConfig = pityConfig;
+            standardBanner.CommonPool = new List<string>(pool3Star);
+            standardBanner.RarePool = new List<string>(pool4Star);
+            standardBanner.LegendaryPool = new List<string>(pool5Star);
+            standardBanner.MythicPool = new List<string>();
+            standardBanner.FeaturedCompanionId = "";
+            standardBanner.FeaturedRarity = Rarity.Common;
+            _testBanners.Add(standardBanner);
+
+            // Banner 2: Radiant Pyre (Featured: Seraphine Dawnveil)
+            var featuredBanner = ScriptableObject.CreateInstance<BannerDefinitionSO>();
+            featuredBanner.BannerName = "Radiant Pyre";
+            featuredBanner.BannerId = "featured_seraphine";
+            featuredBanner.Description = "Featured: Seraphine Dawnveil (5★ Magician / Pyro)";
+            featuredBanner.CommonRate = 0.85f;
+            featuredBanner.RareRate = 0.12f;
+            featuredBanner.LegendaryRate = 0.03f;
+            featuredBanner.MythicRate = 0f;
+            featuredBanner.PityConfig = pityConfig;
+            featuredBanner.CommonPool = new List<string>(pool3Star);
+            featuredBanner.RarePool = new List<string>(pool4Star);
+            featuredBanner.LegendaryPool = new List<string>(pool5Star);
+            featuredBanner.MythicPool = new List<string>();
+            featuredBanner.FeaturedCompanionId = "companion_seraphine";
+            featuredBanner.FeaturedRarity = Rarity.Legendary;
+            _testBanners.Add(featuredBanner);
+
+            // Banner 3: Elemental Convergence (Pyro + Verdant only)
+            var pyroVerdantCommon = pool3Star.FindAll(id =>
+                CompanionRegistry.TryGetValue(id, out var info) && (info.Element == "Pyro" || info.Element == "Verdant"));
+            var pyroVerdantRare = pool4Star.FindAll(id =>
+                CompanionRegistry.TryGetValue(id, out var info) && (info.Element == "Pyro" || info.Element == "Verdant"));
+            var pyroVerdantLeg = pool5Star.FindAll(id =>
+                CompanionRegistry.TryGetValue(id, out var info) && (info.Element == "Pyro" || info.Element == "Verdant"));
+
+            var elementalBanner = ScriptableObject.CreateInstance<BannerDefinitionSO>();
+            elementalBanner.BannerName = "Elemental Convergence";
+            elementalBanner.BannerId = "elemental_pyro_verdant";
+            elementalBanner.Description = "Elemental focus: only Pyro & Verdant companions appear.";
+            elementalBanner.CommonRate = 0.85f;
+            elementalBanner.RareRate = 0.12f;
+            elementalBanner.LegendaryRate = 0.03f;
+            elementalBanner.MythicRate = 0f;
+            elementalBanner.PityConfig = pityConfig;
+            elementalBanner.CommonPool = pyroVerdantCommon;
+            elementalBanner.RarePool = pyroVerdantRare;
+            elementalBanner.LegendaryPool = pyroVerdantLeg;
+            elementalBanner.MythicPool = new List<string>();
+            elementalBanner.FeaturedCompanionId = "";
+            elementalBanner.FeaturedRarity = Rarity.Common;
+            _testBanners.Add(elementalBanner);
+
+            // Banner 4: Legacy — Theron (Featured: Theron Ashblood)
+            var legacyBanner = ScriptableObject.CreateInstance<BannerDefinitionSO>();
+            legacyBanner.BannerName = "Legacy: Theron";
+            legacyBanner.BannerId = "legacy_theron";
+            legacyBanner.Description = "Featured: Theron Ashblood (5★ Necromancer / Umbral)";
+            legacyBanner.CommonRate = 0.85f;
+            legacyBanner.RareRate = 0.12f;
+            legacyBanner.LegendaryRate = 0.03f;
+            legacyBanner.MythicRate = 0f;
+            legacyBanner.PityConfig = pityConfig;
+            legacyBanner.CommonPool = new List<string>(pool3Star);
+            legacyBanner.RarePool = new List<string>(pool4Star);
+            legacyBanner.LegendaryPool = new List<string>(pool5Star);
+            legacyBanner.MythicPool = new List<string>();
+            legacyBanner.FeaturedCompanionId = "companion_theron";
+            legacyBanner.FeaturedRarity = Rarity.Legendary;
+            _testBanners.Add(legacyBanner);
 
             // --- Quests ---
             _testQuests.Add(CreateQuest("The Blight Spreads", "quest_blight_01",
@@ -556,6 +776,14 @@ namespace SoR.Testing
 
             // --- Weapons ---
             SeedWeapons();
+
+            // --- Fog of War: pre-reveal spawn area around (0,0) ---
+            RevealFogAroundPlayer();
+            // Also manually reveal a small cluster around world origin
+            for (int r = 8; r <= 11; r++)
+                for (int c = 8; c <= 11; c++)
+                    _revealedFogCells.Add(r * FogGridRes + c);
+            _visitedRegions.Add("Greenreach Valley");
         }
 
         // ================================================================
@@ -747,6 +975,48 @@ namespace SoR.Testing
                 ("venom_vial", 150, 5),
                 ("dark_crystal", 500, 2),
             });
+
+            // --- Titles ---
+            // Farming
+            CreateTitle("seedling", "Seedling", "+5% XP from gathering",
+                "Harvest 10 crops", new StatBlock { Harvest = 2 });
+            CreateTitle("greenhand", "Greenhand", "+10% healing from consumables",
+                "Use 25 consumables", new StatBlock { Vigor = 3 });
+            CreateTitle("master_cultivator", "Master Cultivator", "+15% crafting quality",
+                "Craft 50 items", new StatBlock { Harvest = 5 });
+            CreateTitle("son_of_the_soil", "Son of the Soil", "+20% crit chance",
+                "Reach Harvest level 10", new StatBlock { Agility = 6 });
+            CreateTitle("last_farmer_of_millhaven", "Last Farmer of Millhaven", "+10% dmg vs Withered",
+                "Complete the Millhaven questline", new StatBlock { Strength = 4 });
+
+            // Combat
+            CreateTitle("reluctant_blade", "Reluctant Blade", "+5% dodge distance",
+                "Win your first combat encounter", new StatBlock { Agility = 2 });
+            CreateTitle("scarecrow", "Scarecrow", "+10% intimidation",
+                "Defeat 50 enemies", new StatBlock { Strength = 3, Resilience = 2 });
+            CreateTitle("blight_reaper", "Blight Reaper", "+15% dmg vs corrupted",
+                "Defeat 100 Blighted enemies", new StatBlock { Strength = 5 });
+            CreateTitle("warden_of_the_green", "Warden of the Green", "+20% Verdance regen",
+                "Restore 3 corrupted zones", new StatBlock { Verdance = 8 });
+            CreateTitle("legend_of_eldrath", "Legend of Eldrath", "+25% all stats in NG+",
+                "Complete the main story", new StatBlock { Vigor = 5, Strength = 5, Harvest = 5, Verdance = 5, Agility = 5, Resilience = 5 });
+
+            // Exploration & Social
+            CreateTitle("wanderer", "Wanderer", "+10% move speed on roads",
+                "Discover 5 regions", new StatBlock { Agility = 4 });
+            CreateTitle("lorekeep", "Lorekeep", "+15% XP from quests",
+                "Complete 20 quests", new StatBlock { Vigor = 4 });
+            CreateTitle("the_peoples_champion", "The People's Champion", "+20% shop discounts",
+                "Reach max reputation with 3 NPCs", new StatBlock { Resilience = 5 });
+            CreateTitle("herbalist_supreme", "Herbalist Supreme", "+25% potion potency",
+                "Craft 30 potions", new StatBlock { Harvest = 6, Verdance = 4 });
+            CreateTitle("accord_keeper", "Accord Keeper", "+15% Accord Essence gains",
+                "Complete 5 Accord quests", new StatBlock { Resilience = 3, Vigor = 3 });
+
+            // Starter unlocks (one per category)
+            _titleSystem.UnlockTitle("seedling");
+            _titleSystem.UnlockTitle("reluctant_blade");
+            _titleSystem.UnlockTitle("wanderer");
         }
 
         private void CreateAndRegisterShop(string shopId, string shopName, (string itemId, int price, int stock)[] items)
@@ -953,7 +1223,7 @@ namespace SoR.Testing
             var textGo = new GameObject("HintText");
             textGo.transform.SetParent(_hintBar.transform, false);
             var text = textGo.AddComponent<Text>();
-            text.text = "[I] Inventory  [E] NPC/Equipment  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [`] Cheats  [ESC] Close";
+            text.text = "[I] Inventory  [E] NPC/Equipment  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [T] Titles  [`] Cheats  [ESC] Close";
             text.font = _font;
             text.fontSize = 16;
             text.color = Color.white;
@@ -1285,41 +1555,150 @@ namespace SoR.Testing
 
         private void ShowGacha()
         {
-            var panel = CreateScreenPanel("Summoning — " + _testBanner.BannerName);
+            if (_gachaSubScreen == 1) { ShowWishHistory(); return; }
+            if (_gachaSubScreen == 2) { ShowRateDetails(); return; }
 
-            // Banner info
+            if (_gachaBannerIndex >= _testBanners.Count) _gachaBannerIndex = 0;
+            var banner = _testBanners[_gachaBannerIndex];
+
+            var panel = CreateScreenPanel("Summoning");
+
+            // ---- Banner Tabs (top bar) ----
+            float tabWidth = 1f / _testBanners.Count;
+            for (int i = 0; i < _testBanners.Count; i++)
+            {
+                int idx = i;
+                bool active = (i == _gachaBannerIndex);
+                string tabLabel = _testBanners[i].BannerName;
+                if (!string.IsNullOrEmpty(_testBanners[i].FeaturedCompanionId))
+                    tabLabel += "\u2605"; // star marker for featured
+
+                var tabGo = new GameObject("Tab_" + i);
+                tabGo.transform.SetParent(panel.transform, false);
+                var tabRt = tabGo.AddComponent<RectTransform>();
+                tabRt.anchorMin = new Vector2(i * tabWidth, 0.91f);
+                tabRt.anchorMax = new Vector2((i + 1) * tabWidth, 0.96f);
+                tabRt.offsetMin = new Vector2(2f, 0f);
+                tabRt.offsetMax = new Vector2(-2f, 0f);
+
+                var tabImg = tabGo.AddComponent<Image>();
+                tabImg.color = active ? new Color(0.3f, 0.25f, 0.5f) : new Color(0.15f, 0.15f, 0.2f);
+
+                var tabBtn = tabGo.AddComponent<Button>();
+                tabBtn.targetGraphic = tabImg;
+                tabBtn.onClick.AddListener(() =>
+                {
+                    _gachaBannerIndex = idx;
+                    CloseActiveScreen(); ShowGacha();
+                });
+
+                var tabText = new GameObject("Text");
+                tabText.transform.SetParent(tabGo.transform, false);
+                var tt = tabText.AddComponent<Text>();
+                tt.text = tabLabel;
+                tt.font = _font;
+                tt.fontSize = 13;
+                tt.fontStyle = active ? FontStyle.Bold : FontStyle.Normal;
+                tt.color = active ? new Color(0.95f, 0.85f, 0.5f) : new Color(0.6f, 0.6f, 0.6f);
+                tt.alignment = TextAnchor.MiddleCenter;
+                var ttRt = tabText.GetComponent<RectTransform>();
+                ttRt.anchorMin = Vector2.zero;
+                ttRt.anchorMax = Vector2.one;
+                ttRt.offsetMin = Vector2.zero;
+                ttRt.offsetMax = Vector2.zero;
+            }
+
+            // ---- Banner Splash ----
+            var splashArea = new GameObject("Splash");
+            splashArea.transform.SetParent(panel.transform, false);
+            var splashRt = splashArea.AddComponent<RectTransform>();
+            splashRt.anchorMin = new Vector2(0f, 0.72f);
+            splashRt.anchorMax = new Vector2(1f, 0.91f);
+            splashRt.offsetMin = new Vector2(20f, 0f);
+            splashRt.offsetMax = new Vector2(-20f, 0f);
+
+            string bannerTitle = $"\u2726 {banner.BannerName.ToUpper()} \u2726";
+            AddLabel(splashArea.transform, bannerTitle, 22, TextAnchor.MiddleCenter,
+                new Vector2(0f, 0.5f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
+                Vector2.zero, Vector2.zero, new Color(1f, 0.85f, 0.3f));
+
+            string descLine = banner.Description;
+            if (!string.IsNullOrEmpty(banner.FeaturedCompanionId) && CompanionRegistry.TryGetValue(banner.FeaturedCompanionId, out var featInfo))
+                descLine = $"Featured: {featInfo.Name} (5\u2605 {featInfo.Class} / {featInfo.Element})";
+
+            AddLabel(splashArea.transform, descLine, 16, TextAnchor.MiddleCenter,
+                new Vector2(0f, 0f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, Vector2.zero,
+                !string.IsNullOrEmpty(banner.FeaturedCompanionId) ? new Color(1f, 0.92f, 0.6f) : new Color(0.7f, 0.7f, 0.8f));
+
+            // ---- Currency & Pity Display ----
+            var pity = _gacha.GetPityTracker(banner.BannerId);
+            int pityCount = pity.PullsSinceLegendary;
+            int hardPity = banner.PityConfig != null ? banner.PityConfig.LegendaryHardPity : 60;
+            float pityPct = Mathf.Clamp01((float)pityCount / hardPity);
+
             var infoArea = new GameObject("Info");
             infoArea.transform.SetParent(panel.transform, false);
             var infoRt = infoArea.AddComponent<RectTransform>();
-            infoRt.anchorMin = new Vector2(0f, 0.7f);
-            infoRt.anchorMax = new Vector2(1f, 0.9f);
+            infoRt.anchorMin = new Vector2(0f, 0.58f);
+            infoRt.anchorMax = new Vector2(1f, 0.72f);
             infoRt.offsetMin = new Vector2(20f, 0f);
             infoRt.offsetMax = new Vector2(-20f, 0f);
 
-            var pity = _gacha.GetPityTracker(_testBanner.BannerId);
-            string infoStr = $"{_testBanner.Description}\n" +
-                             $"Rates:  Common {_testBanner.CommonRate * 100:F0}%  Rare {_testBanner.RareRate * 100:F0}%  Legendary {_testBanner.LegendaryRate * 100:F0}%  Mythic {_testBanner.MythicRate * 100:F0}%\n" +
-                             $"Pity: {pity.PullsSinceLegendary}/90 (Legendary)   {pity.PullsSinceMythic}/180 (Mythic)   Total Pulls: {pity.TotalPulls}   Essence: {_accordEssence}";
-            var infoText = AddTextChild(infoArea.transform, infoStr, 16, TextAnchor.UpperLeft, Color.white);
+            string currencyLine = $"Starseeds: {_starseeds:N0}  \u2726          Accord Essence: {_accordEssence}";
+            AddLabel(infoArea.transform, currencyLine, 16, TextAnchor.MiddleLeft,
+                new Vector2(0f, 0.55f), new Vector2(1f, 1f), new Vector2(0f, 1f),
+                new Vector2(10f, 0f), Vector2.zero, new Color(0.6f, 0.9f, 1f));
 
-            // Buttons area
-            AddButtonAt(panel.transform, "Pull x1", new Vector2(0.25f, 0.55f), new Vector2(200f, 50f), () =>
+            // Pity bar (text-based)
+            int filledBlocks = Mathf.RoundToInt(pityPct * 20);
+            string pityBar = new string('\u2593', filledBlocks) + new string('\u2591', 20 - filledBlocks);
+            string fiftyFiftyStatus = !string.IsNullOrEmpty(banner.FeaturedCompanionId)
+                ? (pity.LostLastFiftyFifty ? "Guaranteed" : "50/50")
+                : "N/A";
+            string pityLine = $"  {pityBar}  Pity: {pityCount}/{hardPity}    50/50: {fiftyFiftyStatus}    Total: {pity.TotalPulls}";
+            Color pityColor = pityPct > 0.8f ? new Color(1f, 0.4f, 0.3f)
+                            : pityPct > 0.5f ? new Color(1f, 0.85f, 0.3f)
+                            : new Color(0.5f, 0.8f, 0.5f);
+            AddLabel(infoArea.transform, pityLine, 14, TextAnchor.MiddleLeft,
+                new Vector2(0f, 0f), new Vector2(1f, 0.55f), new Vector2(0f, 0.5f),
+                Vector2.zero, Vector2.zero, pityColor);
+
+            // ---- Pull Buttons ----
+            bool canPull1 = CanAffordPull(1) && !_isGachaAnimating;
+            bool canPull10 = CanAffordPull(10) && !_isGachaAnimating;
+
+            string pull1Label = $"Pull x1 \u2014 {StarseedCostSingle} \u2726";
+            string pull10Label = $"Pull x10 \u2014 {StarseedCost10Pull} \u2726";
+
+            var btn1Go = new GameObject("Btn_Pull1");
+            btn1Go.transform.SetParent(panel.transform, false);
+            var btn1Rt = btn1Go.AddComponent<RectTransform>();
+            btn1Rt.anchorMin = new Vector2(0.12f, 0.48f);
+            btn1Rt.anchorMax = new Vector2(0.45f, 0.56f);
+            btn1Rt.offsetMin = Vector2.zero;
+            btn1Rt.offsetMax = Vector2.zero;
+            var btn1Img = btn1Go.AddComponent<Image>();
+            btn1Img.color = canPull1 ? new Color(0.25f, 0.4f, 0.6f) : new Color(0.2f, 0.2f, 0.25f);
+            var btn1 = btn1Go.AddComponent<Button>();
+            btn1.targetGraphic = btn1Img;
+            btn1.interactable = canPull1;
+            btn1.onClick.AddListener(() =>
             {
-                if (_isGachaAnimating) return;
+                if (_isGachaAnimating || !CanAffordPull(1)) return;
+                SpendStarseeds(1);
+                var result = _gacha.Pull(banner);
+                RecordWishHistory(result, banner);
+                LogPullResult(result);
 
-                var result = _gacha.Pull(_testBanner);
-                var wheelCompanions = BuildWheelCompanions();
+                var wheelCompanions = BuildWheelCompanions(banner);
                 int winIdx = FindCompanionIndex(wheelCompanions, result.CompanionId);
-
                 _isGachaAnimating = true;
                 _roulette = GachaRouletteUI.Create(_canvas, _font);
                 _roulette.Spin(wheelCompanions, winIdx, () =>
                 {
-                    string star = RarityStars(result.Rarity);
-                    string dup = result.IsDuplicate ? " (DUP)" : " NEW!";
-                    _gachaLog.Insert(0, $"{star} {FormatItemName(result.CompanionId)}{dup}");
-                    if (_gachaLog.Count > 20) _gachaLog.RemoveAt(20);
-
+                    if (!result.IsDuplicate)
+                        _unlockedCompanions.Add(result.CompanionId);
                     _roulette.Dismiss();
                     _roulette = null;
                     _isGachaAnimating = false;
@@ -1327,31 +1706,48 @@ namespace SoR.Testing
                     ShowGacha();
                 });
             });
+            AddTextChild(btn1Go.transform, pull1Label, 16, TextAnchor.MiddleCenter,
+                canPull1 ? Color.white : new Color(0.5f, 0.5f, 0.5f));
 
-            AddButtonAt(panel.transform, "Pull x10", new Vector2(0.75f, 0.55f), new Vector2(200f, 50f), () =>
+            var btn10Go = new GameObject("Btn_Pull10");
+            btn10Go.transform.SetParent(panel.transform, false);
+            var btn10Rt = btn10Go.AddComponent<RectTransform>();
+            btn10Rt.anchorMin = new Vector2(0.55f, 0.48f);
+            btn10Rt.anchorMax = new Vector2(0.88f, 0.56f);
+            btn10Rt.offsetMin = Vector2.zero;
+            btn10Rt.offsetMax = Vector2.zero;
+            var btn10Img = btn10Go.AddComponent<Image>();
+            btn10Img.color = canPull10 ? new Color(0.35f, 0.3f, 0.55f) : new Color(0.2f, 0.2f, 0.25f);
+            var btn10Btn = btn10Go.AddComponent<Button>();
+            btn10Btn.targetGraphic = btn10Img;
+            btn10Btn.interactable = canPull10;
+            btn10Btn.onClick.AddListener(() =>
             {
-                if (_isGachaAnimating) return;
+                if (_isGachaAnimating || !CanAffordPull(10)) return;
+                SpendStarseeds(10);
+                var results = _gacha.Pull10(banner);
 
-                var results = _gacha.Pull10(_testBanner);
+                // Find best result to feature in roulette
+                var featured = results[0];
+                foreach (var r in results)
+                {
+                    if (r.Rarity > featured.Rarity) featured = r;
+                }
 
-                // Feature the last drop in the roulette animation
-                var featured = results[results.Count - 1];
+                foreach (var r in results)
+                {
+                    RecordWishHistory(r, banner);
+                    LogPullResult(r);
+                    if (!r.IsDuplicate)
+                        _unlockedCompanions.Add(r.CompanionId);
+                }
 
-                var wheelCompanions = BuildWheelCompanions();
+                var wheelCompanions = BuildWheelCompanions(banner);
                 int winIdx = FindCompanionIndex(wheelCompanions, featured.CompanionId);
-
                 _isGachaAnimating = true;
                 _roulette = GachaRouletteUI.Create(_canvas, _font);
                 _roulette.Spin(wheelCompanions, winIdx, () =>
                 {
-                    foreach (var r in results)
-                    {
-                        string star = RarityStars(r.Rarity);
-                        string dup = r.IsDuplicate ? " (DUP)" : " NEW!";
-                        _gachaLog.Insert(0, $"{star} {FormatItemName(r.CompanionId)}{dup}");
-                    }
-                    if (_gachaLog.Count > 20) _gachaLog.RemoveRange(20, _gachaLog.Count - 20);
-
                     _roulette.Dismiss();
                     _roulette = null;
                     _isGachaAnimating = false;
@@ -1359,18 +1755,179 @@ namespace SoR.Testing
                     ShowGacha();
                 });
             });
+            AddTextChild(btn10Go.transform, pull10Label, 16, TextAnchor.MiddleCenter,
+                canPull10 ? Color.white : new Color(0.5f, 0.5f, 0.5f));
 
-            // Pull log
-            var logContent = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.5f));
+            // ---- Sub-screen Buttons ----
+            AddButtonAt(panel.transform, "Wish History", new Vector2(0.25f, 0.42f), new Vector2(160f, 32f), () =>
+            {
+                _gachaSubScreen = 1;
+                CloseActiveScreen(); ShowGacha();
+            });
+            AddButtonAt(panel.transform, "Rate Details", new Vector2(0.75f, 0.42f), new Vector2(160f, 32f), () =>
+            {
+                _gachaSubScreen = 2;
+                CloseActiveScreen(); ShowGacha();
+            });
+
+            // ---- Recent Summons Log ----
+            var logHeader = new GameObject("LogHeader");
+            logHeader.transform.SetParent(panel.transform, false);
+            var logHeaderRt = logHeader.AddComponent<RectTransform>();
+            logHeaderRt.anchorMin = new Vector2(0f, 0.35f);
+            logHeaderRt.anchorMax = new Vector2(1f, 0.40f);
+            logHeaderRt.offsetMin = new Vector2(20f, 0f);
+            logHeaderRt.offsetMax = new Vector2(-20f, 0f);
+            AddTextChild(logHeader.transform, "Recent Summons:", 14, TextAnchor.MiddleLeft, new Color(0.7f, 0.7f, 0.8f));
+
+            var logContent = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.35f));
             for (int i = 0; i < _gachaLog.Count; i++)
             {
-                Color c = Color.white;
-                if (_gachaLog[i].Contains("***")) c = new Color(1f, 0.5f, 1f); // Mythic
-                else if (_gachaLog[i].Contains("**")) c = new Color(1f, 0.85f, 0.3f); // Legendary
-                else if (_gachaLog[i].Contains("*")) c = new Color(0.5f, 0.7f, 1f); // Rare
+                Color c;
+                if (_gachaLog[i].StartsWith("★★★★★"))
+                    c = new Color(1f, 0.85f, 0.3f);   // 5★ gold
+                else if (_gachaLog[i].StartsWith("★★★★"))
+                    c = new Color(0.7f, 0.3f, 0.9f);   // 4★ purple
+                else
+                    c = new Color(0.4f, 0.65f, 1f);    // 3★ blue
+
                 AddRowLabel(logContent, "  " + _gachaLog[i], i, c);
             }
             SetContentHeight(logContent, _gachaLog.Count);
+        }
+
+        // ================================================================
+        // WISH HISTORY SUB-SCREEN
+        // ================================================================
+
+        private void ShowWishHistory()
+        {
+            var panel = CreateScreenPanel("Wish History");
+
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.88f));
+
+            // Header row
+            AddRowLabel(content, "  #     Stars           Companion                    Banner              Status", 0, new Color(0.7f, 0.7f, 0.8f));
+
+            int row = 1;
+            for (int i = 0; i < _wishHistory.Count; i++)
+            {
+                var (companionId, rarity, isDuplicate, bannerName, pullNumber) = _wishHistory[i];
+                string stars = RarityStars(rarity);
+                string name = GetCompanionDisplayName(companionId);
+                string status = isDuplicate ? "(DUP)" : "NEW!";
+
+                Color c = rarity switch
+                {
+                    Rarity.Legendary => new Color(1f, 0.85f, 0.3f),
+                    Rarity.Rare => new Color(0.7f, 0.3f, 0.9f),
+                    _ => new Color(0.4f, 0.65f, 1f)
+                };
+
+                string line = $"  {pullNumber,-5} {stars,-16} {name,-28} {bannerName,-20} {status}";
+                AddRowLabel(content, line, row, c);
+                row++;
+            }
+
+            if (_wishHistory.Count == 0)
+            {
+                AddRowLabel(content, "  No summons yet — try your luck!", 1, new Color(0.5f, 0.5f, 0.5f));
+                row = 2;
+            }
+
+            SetContentHeight(content, row);
+
+            // Back button
+            AddButtonAt(panel.transform, "Back", new Vector2(0.5f, 0.94f), new Vector2(100f, 32f), () =>
+            {
+                _gachaSubScreen = 0;
+                CloseActiveScreen(); ShowGacha();
+            });
+        }
+
+        // ================================================================
+        // RATE DETAILS SUB-SCREEN
+        // ================================================================
+
+        private void ShowRateDetails()
+        {
+            if (_gachaBannerIndex >= _testBanners.Count) _gachaBannerIndex = 0;
+            var banner = _testBanners[_gachaBannerIndex];
+
+            var panel = CreateScreenPanel("Rate Details — " + banner.BannerName);
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.88f));
+
+            int row = 0;
+            Color headerColor = new Color(0.95f, 0.85f, 0.5f);
+            Color textColor = new Color(0.85f, 0.85f, 0.9f);
+            Color dimColor = new Color(0.6f, 0.6f, 0.65f);
+
+            // Base rates
+            AddRowLabel(content, "  --- Base Rates ---", row, headerColor); row++;
+            AddRowLabel(content, $"  5★ Legendary:  {banner.LegendaryRate * 100:F1}%", row, new Color(1f, 0.85f, 0.3f)); row++;
+            AddRowLabel(content, $"  4★ Epic:       {banner.RareRate * 100:F1}%", row, new Color(0.7f, 0.3f, 0.9f)); row++;
+            AddRowLabel(content, $"  3★ Rare:       {banner.CommonRate * 100:F1}%", row, new Color(0.4f, 0.65f, 1f)); row++;
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // Pity system
+            AddRowLabel(content, "  --- Pity System ---", row, headerColor); row++;
+            int softPity = banner.PityConfig != null ? banner.PityConfig.LegendarySoftPity : 50;
+            int hardPity = banner.PityConfig != null ? banner.PityConfig.LegendaryHardPity : 60;
+            float boost = banner.PityConfig != null ? banner.PityConfig.SoftPityRateBoost : 0.06f;
+            AddRowLabel(content, $"  Soft pity begins at pull {softPity} (+{boost * 100:F0}% per pull)", row, textColor); row++;
+            AddRowLabel(content, $"  Hard pity at pull {hardPity} (guaranteed 5★)", row, textColor); row++;
+            AddRowLabel(content, "  10-pull guarantees at least one 4★ or higher", row, textColor); row++;
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // 50/50 rules
+            if (!string.IsNullOrEmpty(banner.FeaturedCompanionId))
+            {
+                AddRowLabel(content, "  --- 50/50 Featured System ---", row, headerColor); row++;
+                AddRowLabel(content, "  When you pull a 5★, there is a 50% chance it is the featured companion.", row, textColor); row++;
+                AddRowLabel(content, "  If you lose the 50/50, your next 5★ is guaranteed to be the featured.", row, textColor); row++;
+                AddRowLabel(content, "", row, Color.white); row++;
+            }
+
+            // Pool contents
+            AddRowLabel(content, "  --- 5★ Pool ---", row, headerColor); row++;
+            foreach (var id in banner.LegendaryPool)
+            {
+                string tag = id == banner.FeaturedCompanionId ? "  [RATE UP]" : "";
+                Color c = id == banner.FeaturedCompanionId ? new Color(1f, 0.85f, 0.3f) : textColor;
+                string cInfo = CompanionRegistry.TryGetValue(id, out var info)
+                    ? $"  {info.Name} ({info.Class} / {info.Element}){tag}"
+                    : $"  {FormatItemName(id)}{tag}";
+                AddRowLabel(content, cInfo, row, c); row++;
+            }
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            AddRowLabel(content, "  --- 4★ Pool ---", row, headerColor); row++;
+            foreach (var id in banner.RarePool)
+            {
+                string cInfo = CompanionRegistry.TryGetValue(id, out var info)
+                    ? $"  {info.Name} ({info.Class} / {info.Element})"
+                    : $"  {FormatItemName(id)}";
+                AddRowLabel(content, cInfo, row, new Color(0.7f, 0.3f, 0.9f)); row++;
+            }
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            AddRowLabel(content, "  --- 3★ Pool ---", row, headerColor); row++;
+            foreach (var id in banner.CommonPool)
+            {
+                string cInfo = CompanionRegistry.TryGetValue(id, out var info)
+                    ? $"  {info.Name} ({info.Class} / {info.Element})"
+                    : $"  {FormatItemName(id)}";
+                AddRowLabel(content, cInfo, row, dimColor); row++;
+            }
+
+            SetContentHeight(content, row);
+
+            // Back button
+            AddButtonAt(panel.transform, "Back", new Vector2(0.5f, 0.94f), new Vector2(100f, 32f), () =>
+            {
+                _gachaSubScreen = 0;
+                CloseActiveScreen(); ShowGacha();
+            });
         }
 
         // ================================================================
@@ -1381,34 +1938,27 @@ namespace SoR.Testing
         {
             var panel = CreateScreenPanel("Companion Roster");
 
-            string[] companionIds = {
-                "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
-                "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
-                "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
-            };
-            Rarity[] rarities = {
-                Rarity.Common, Rarity.Common, Rarity.Common, Rarity.Common,
-                Rarity.Rare, Rarity.Rare, Rarity.Rare, Rarity.Rare,
-                Rarity.Legendary, Rarity.Legendary, Rarity.Legendary, Rarity.Mythic
-            };
-            string[] elements = {
-                "None", "Verdant", "Volt", "Hydro",
-                "Geo", "Pyro", "Verdant", "Hydro",
-                "Verdant", "Umbral", "Cryo", "Pyro"
-            };
-            string[] classes = {
-                "Swordsman", "Guardian", "Archer", "Mage",
-                "Guardian", "Mage", "Archer", "Healer",
-                "Archer", "Necromancer", "Assassin", "Summoner"
-            };
+            // Build sorted companion list from registry (5★ first, then 4★, then 3★)
+            var sortedCompanions = new List<(string id, string name, string cls, string element, Rarity rarity)>();
+            foreach (var kvp in CompanionRegistry)
+            {
+                Rarity r = GetCompanionRarity(kvp.Key);
+                sortedCompanions.Add((kvp.Key, kvp.Value.Name, kvp.Value.Class, kvp.Value.Element, r));
+            }
+            sortedCompanions.Sort((a, b) =>
+            {
+                int ra = a.rarity == Rarity.Legendary ? 0 : a.rarity == Rarity.Rare ? 1 : 2;
+                int rb = b.rarity == Rarity.Legendary ? 0 : b.rarity == Rarity.Rare ? 1 : 2;
+                return ra != rb ? ra.CompareTo(rb) : string.Compare(a.name, b.name, System.StringComparison.Ordinal);
+            });
 
             // Helper to look up display info for a companion id
             string CompanionLine(string id)
             {
-                int idx = System.Array.IndexOf(companionIds, id);
-                if (idx < 0) return id;
+                if (!CompanionRegistry.TryGetValue(id, out var info)) return id;
+                Rarity r = GetCompanionRarity(id);
                 int lvl = GetCompanionLevel(id);
-                return $"{RarityStars(rarities[idx])} {FormatItemName(id)}   {elements[idx]}  {classes[idx]}  Lv {lvl}";
+                return $"{RarityStars(r)} {info.Name}   {info.Element}  {info.Class}  Lv {lvl}";
             }
 
             // --- A) Party slots header (top 20% of panel) ---
@@ -1457,39 +2007,37 @@ namespace SoR.Testing
             var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.77f));
 
             int row = 0;
-            for (int i = 0; i < companionIds.Length; i++)
+            foreach (var (cId, cName, cls, element, rarity) in sortedCompanions)
             {
-                string cId = companionIds[i];
                 bool owned = IsCompanionOwned(cId);
-                string star = RarityStars(rarities[i]);
+                string star = RarityStars(rarity);
                 int lvl = GetCompanionLevel(cId);
-                Color color = owned ? RarityToColor(rarities[i]) : new Color(0.3f, 0.3f, 0.3f);
+                Color color = owned ? RarityToColor(rarity) : new Color(0.3f, 0.3f, 0.3f);
 
                 if (!owned)
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  [LOCKED]";
+                    string line = $"  {star} {cName}   {element}  {cls}  [LOCKED]";
                     AddRowLabel(content, line, row, color);
                 }
                 else if (cId == _partyActiveId)
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  Lv {lvl}  [ACTIVE]";
+                    string line = $"  {star} {cName}   {element}  {cls}  Lv {lvl}  [ACTIVE]";
                     AddRowLabel(content, line, row, color);
                     string capturedId = cId;
                     AddUpgradeButton(content, row, capturedId);
                 }
                 else if (cId == _partySupportId)
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  Lv {lvl}  [SUPPORT]";
+                    string line = $"  {star} {cName}   {element}  {cls}  Lv {lvl}  [SUPPORT]";
                     AddRowLabel(content, line, row, color);
                     string capturedId = cId;
                     AddUpgradeButton(content, row, capturedId);
                 }
                 else
                 {
-                    string line = $"  {star} {FormatItemName(cId)}   {elements[i]}  {classes[i]}  Lv {lvl}";
+                    string line = $"  {star} {cName}   {element}  {cls}  Lv {lvl}";
                     AddRowLabel(content, line, row, color);
                     string capturedId = cId;
-                    // Upgrade button at a fixed position (left of Active/Support)
                     AddUpgradeButton(content, row, capturedId);
                     AddDualButtons(content, row,
                         "Active", () =>
@@ -1562,32 +2110,10 @@ namespace SoR.Testing
 
         private void ShowCompanionUpgrade(string companionId)
         {
-            string[] companionIds = {
-                "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
-                "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
-                "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
-            };
-            Rarity[] rarities = {
-                Rarity.Common, Rarity.Common, Rarity.Common, Rarity.Common,
-                Rarity.Rare, Rarity.Rare, Rarity.Rare, Rarity.Rare,
-                Rarity.Legendary, Rarity.Legendary, Rarity.Legendary, Rarity.Mythic
-            };
-            string[] elements = {
-                "None", "Verdant", "Volt", "Hydro",
-                "Geo", "Pyro", "Verdant", "Hydro",
-                "Verdant", "Umbral", "Cryo", "Pyro"
-            };
-            string[] classes = {
-                "Swordsman", "Guardian", "Archer", "Mage",
-                "Guardian", "Mage", "Archer", "Healer",
-                "Archer", "Necromancer", "Assassin", "Summoner"
-            };
-
-            int idx = System.Array.IndexOf(companionIds, companionId);
-            string displayName = FormatItemName(companionId);
-            Rarity rarity = idx >= 0 ? rarities[idx] : Rarity.Common;
-            string element = idx >= 0 ? elements[idx] : "None";
-            string cls = idx >= 0 ? classes[idx] : "Unknown";
+            string displayName = GetCompanionDisplayName(companionId);
+            Rarity rarity = GetCompanionRarity(companionId);
+            string element = CompanionRegistry.TryGetValue(companionId, out var info) ? info.Element : "None";
+            string cls = CompanionRegistry.ContainsKey(companionId) ? CompanionRegistry[companionId].Class : "Unknown";
             string stars = RarityStars(rarity);
 
             int currentLevel = GetCompanionLevel(companionId);
@@ -1800,240 +2326,517 @@ namespace SoR.Testing
         // MAP SCREEN
         // ================================================================
 
+        private string _selectedMapRegion;
+
         private void ShowMap()
         {
             var panel = CreateScreenPanel("World Map");
-            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
 
-            // Full GDD region data: Name, Biome, Element, LevelMin, LevelMax, Hub, Theme, Blight
-            var regions = new[]
+            // Biome data matching TestSceneSetup.InitBiomeZones
+            var biomes = new[]
             {
-                (name: "Greenreach Valley",   biome: "Temperate farmland / forest",       element: "Verdant", lvMin: 1,  lvMax: 10, hub: "Thornwall",         theme: "Loss, beginnings, the farming past",    blight: 0.05f),
-                (name: "The Ashen Steppe",    biome: "Scorched plains / dried riverbeds", element: "Pyro",    lvMin: 10, lvMax: 18, hub: "Dusthaven Outpost", theme: "Drought, survival",                     blight: 0.25f),
-                (name: "Gloomtide Marshes",   biome: "Swampland / bioluminescent fungi",  element: "Umbral",  lvMin: 16, lvMax: 24, hub: "Fenwick Village",   theme: "Decay, hidden beauty",                  blight: 0.40f),
-                (name: "Frosthollow Peaks",   biome: "Frozen mountains / alpine tundra",  element: "Cryo",    lvMin: 22, lvMax: 32, hub: "Ironpeak Fortress", theme: "Isolation, endurance",                  blight: 0.15f),
-                (name: "The Withered Heart",  biome: "Corrupted wasteland / twisted",     element: "None",    lvMin: 30, lvMax: 40, hub: "Varek's Sanctum",   theme: "Culmination, sacrifice",                blight: 0.80f),
+                (name: "Greenreach Valley",  cx:   0f, cz:   0f, half: 35f, color: new Color(0.35f, 0.55f, 0.3f),  blight: 0.05f, elem: "Verdant", lvMin: 1,  lvMax: 10, hub: "Thornwall"),
+                (name: "The Ashen Steppe",   cx: -55f, cz: -55f, half: 30f, color: new Color(0.55f, 0.35f, 0.2f),  blight: 0.25f, elem: "Pyro",    lvMin: 10, lvMax: 18, hub: "Dusthaven Outpost"),
+                (name: "Gloomtide Marshes",  cx:  55f, cz: -55f, half: 30f, color: new Color(0.2f, 0.35f, 0.25f),  blight: 0.40f, elem: "Umbral",  lvMin: 16, lvMax: 24, hub: "Fenwick Village"),
+                (name: "Frosthollow Peaks",  cx: -55f, cz:  55f, half: 30f, color: new Color(0.6f, 0.7f, 0.8f),   blight: 0.15f, elem: "Cryo",    lvMin: 22, lvMax: 32, hub: "Ironpeak Fortress"),
+                (name: "The Withered Heart", cx:  55f, cz:  55f, half: 30f, color: new Color(0.3f, 0.15f, 0.2f),   blight: 0.80f, elem: "None",    lvMin: 30, lvMax: 40, hub: "Varek's Sanctum"),
             };
 
-            // GDD 8.2 — Enemies per region: (name, level, category, tier, element)
-            var regionEnemies = new Dictionary<string, (string name, int level, string category, string tier, string element)[]>
+            // Detail data for info panel
+            var regionEnemies = new Dictionary<string, (string name, int level, string tier)[]>
             {
-                ["Greenreach Valley"] = new[]
-                {
-                    ("Withered Wolf",      2,  "Withered Beast",   "Tier 1", "None"),
-                    ("Blight Beetle",      3,  "Blight Spawn",     "Tier 1", "Verdant"),
-                    ("Corrupted Farmhand", 5,  "Corrupted Human",  "Tier 2", "None"),
-                    ("Wither Stag",        8,  "Withered Beast",   "Elite",  "Verdant"),
-                },
-                ["The Ashen Steppe"] = new[]
-                {
-                    ("Dustcrawler",        11, "Withered Beast",   "Tier 1", "Pyro"),
-                    ("Scorched Viper",     13, "The Untamed",      "Tier 1", "Pyro"),
-                    ("Acolyte Ranger",     15, "Varek's Acolytes", "Tier 2", "None"),
-                    ("Ashwalker Golem",    17, "Constructs",       "Elite",  "Pyro"),
-                },
-                ["Gloomtide Marshes"] = new[]
-                {
-                    ("Bogfiend",           17, "Blight Spawn",     "Tier 1", "Umbral"),
-                    ("Sporecap Horror",    19, "Blight Spawn",     "Tier 1", "Verdant"),
-                    ("Drowned Sentinel",   21, "Corrupted Human",  "Tier 2", "Umbral"),
-                    ("The Mire Queen",     23, "Blight Spawn",     "Elite",  "Umbral"),
-                },
-                ["Frosthollow Peaks"] = new[]
-                {
-                    ("Frostwight",         23, "Withered Beast",   "Tier 1", "Cryo"),
-                    ("Glacial Construct",  26, "Constructs",       "Tier 1", "Cryo"),
-                    ("Acolyte Warder",     28, "Varek's Acolytes", "Tier 2", "None"),
-                    ("Avalanche Beast",    31, "Withered Beast",   "Elite",  "Cryo"),
-                },
-                ["The Withered Heart"] = new[]
-                {
-                    ("Hollow Shade",       32, "Blight Spawn",     "Tier 1", "None"),
-                    ("Rootwraith",         35, "Withered Beast",   "Tier 1", "Verdant"),
-                    ("Wither Knight",      37, "Corrupted Human",  "Tier 2", "None"),
-                    ("Blight Colossus",    39, "Blight Spawn",     "Elite",  "None"),
-                },
+                ["Greenreach Valley"] = new[] { ("Withered Wolf", 2, "T1"), ("Blight Beetle", 3, "T1"), ("Corrupted Farmhand", 5, "T2"), ("Wither Stag", 8, "Elite") },
+                ["The Ashen Steppe"]  = new[] { ("Dustcrawler", 11, "T1"), ("Scorched Viper", 13, "T1"), ("Acolyte Ranger", 15, "T2"), ("Ashwalker Golem", 17, "Elite") },
+                ["Gloomtide Marshes"] = new[] { ("Bogfiend", 17, "T1"), ("Sporecap Horror", 19, "T1"), ("Drowned Sentinel", 21, "T2"), ("The Mire Queen", 23, "Elite") },
+                ["Frosthollow Peaks"] = new[] { ("Frostwight", 23, "T1"), ("Glacial Construct", 26, "T1"), ("Acolyte Warder", 28, "T2"), ("Avalanche Beast", 31, "Elite") },
+                ["The Withered Heart"] = new[] { ("Hollow Shade", 32, "T1"), ("Rootwraith", 35, "T1"), ("Wither Knight", 37, "T2"), ("Blight Colossus", 39, "Elite") },
             };
-
-            // GDD 9 — Bosses per region: (name, level, phases, mechanic, isOptional)
-            var regionBosses = new Dictionary<string, (string name, int level, int phases, string mechanic, bool optional)[]>
+            var regionBosses = new Dictionary<string, (string name, int level, bool optional)[]>
             {
-                ["Greenreach Valley"] = new[]
-                {
-                    ("The Rootmother",     10, 2, "Vine traps; burn root nodes in P2",                  false),
-                    ("The Scarecrow King", 12, 2, "Decoy copies; real one identified by shadow",        true),
-                },
-                ["The Ashen Steppe"] = new[]
-                {
-                    ("Cindermaw",          18, 2, "Fire AoE shrinks arena; douse with water",           false),
-                    ("Oasis Phantom",      20, 2, "Mirage attacks; illusions vanish when approached",   true),
-                },
-                ["Gloomtide Marshes"] = new[]
-                {
-                    ("The Mire Sovereign", 24, 3, "Submerges; drain water via valves",                  false),
-                    ("Grandmother Spore",  26, 3, "Toxic clouds; wind mechanics for safe zones",        true),
-                },
-                ["Frosthollow Peaks"] = new[]
-                {
-                    ("Frostfang, the Bound", 32, 3, "Chained beast; breaking chains changes moveset",  false),
-                    ("The Frozen Accord",    34, 3, "Immune to magic P1, physical P2, vulnerable P3",   true),
-                },
-                ["The Withered Heart"] = new[]
-                {
-                    ("Varek Ashwood",      38, 3, "Mirrors player abilities",                           false),
-                    ("The Hollow Mother",  40, 3, "Reality-warping arena",                              true),
-                    ("Primordial Seed",    40, 3, "Secret boss — reality-warping arena",                true),
-                },
+                ["Greenreach Valley"] = new[] { ("The Rootmother", 10, false), ("The Scarecrow King", 12, true) },
+                ["The Ashen Steppe"]  = new[] { ("Cindermaw", 18, false), ("Oasis Phantom", 20, true) },
+                ["Gloomtide Marshes"] = new[] { ("The Mire Sovereign", 24, false), ("Grandmother Spore", 26, true) },
+                ["Frosthollow Peaks"] = new[] { ("Frostfang, the Bound", 32, false), ("The Frozen Accord", 34, true) },
+                ["The Withered Heart"] = new[] { ("Varek Ashwood", 38, false), ("The Hollow Mother", 40, true), ("Primordial Seed", 40, true) },
             };
-
-            // GDD 6.1 — Exploration features: (harvest, restZone, hiddenGrove)
-            var regionExploration = new Dictionary<string, (string harvest, string restZone, string hiddenGrove)>
-            {
-                ["Greenreach Valley"]  = ("Herb patches, Ancient seeds",          "Thornwall Inn Clearing",       "Requires Root Sense — Eldergrove Hollow"),
-                ["The Ashen Steppe"]   = ("Fire minerals, Charred bark",          "Dusthaven Camp",              "Requires Flame Walk — Ember Hollow"),
-                ["Gloomtide Marshes"]  = ("Luminescent fungi, Swamp resin",       "Fenwick Lantern Rest",        "Requires Mire Sight — Glowspore Cavern"),
-                ["Frosthollow Peaks"]  = ("Froststone ore, Alpine lichen",        "Ironpeak Base Camp",          "Requires Frost Step — Crystal Grotto"),
-                ["The Withered Heart"] = ("Blightite shards, Withered essence",   "Sanctum Threshold",           "Requires Verdant Bloom — Heart's Memory"),
-            };
-
-            // Main storyline NPCs per region
             var regionNpcs = new Dictionary<string, (string name, string role)[]>
             {
-                ["Greenreach Valley"] = new[]
-                {
-                    ("Elder Mirren",   "Village Elder — quest giver"),
-                    ("Healer Maren",   "Village Healer — herbalist"),
-                    ("Captain Aldric", "Militia Captain — blight investigation"),
-                    ("Warden Sable",   "Forest Warden — patrols the border"),
-                },
-                ["The Ashen Steppe"] = new[]
-                {
-                    ("Forgemaster Bram", "Guild Forgemaster — crafting master"),
-                    ("Watcher Sera",     "Outpost Scout — tracks blight spread"),
-                    ("Lyra",             "Forest Warden — memory fragments"),
-                },
-                ["Gloomtide Marshes"] = new[]
-                {
-                    ("Oracle Nyx",     "Marsh Seer — blight origin visions"),
-                    ("Ranger Theron",  "Marsh Guide — safe passage"),
-                    ("Selene",         "Moonlight Priestess — purification rites"),
-                },
-                ["Frosthollow Peaks"] = new[]
-                {
-                    ("Scholar Veylin",   "Blight Researcher — ancient texts"),
-                    ("Sentinel Kaelos",  "Mountain Guardian — peak passage"),
-                    ("Thorne",           "Wandering Sellsword — hired blade"),
-                },
-                ["The Withered Heart"] = new[]
-                {
-                    ("The Blightcaller", "Source of the corruption"),
-                    ("Eldara",           "Spirit of the Verdant — ancient guardian"),
-                    ("Echo of Mirren",   "Spectral guide — final trial"),
-                },
+                ["Greenreach Valley"] = new[] { ("Elder Mirren", "Village Elder"), ("Healer Maren", "Herbalist"), ("Warden Sable", "Forest Warden") },
+                ["The Ashen Steppe"]  = new[] { ("Forgemaster Bram", "Crafting Master"), ("Watcher Sera", "Scout"), ("Lyra", "Companion") },
+                ["Gloomtide Marshes"] = new[] { ("Oracle Nyx", "Marsh Seer"), ("Ranger Theron", "Guide"), ("Selene", "Companion") },
+                ["Frosthollow Peaks"] = new[] { ("Scholar Veylin", "Researcher"), ("Sentinel Kaelos", "Guardian"), ("Thorne", "Companion") },
+                ["The Withered Heart"] = new[] { ("The Blightcaller", "Antagonist"), ("Eldara", "Companion"), ("Echo of Mirren", "Guide") },
             };
 
-            // Category colors for enemy types
-            Color CategoryColor(string category) => category switch
+            // ---- LAYOUT: Square map (left), info panel (right) ----
+            float worldMin = -100f;
+            float worldSize = 200f;
+
+            // Helper: world coords to 0..1 normalized map position
+            System.Func<float, float, Vector2> worldToMap = (wx, wz) =>
+                new Vector2((wx - worldMin) / worldSize, (wz - worldMin) / worldSize);
+
+            // == MAP CONTAINER (force square via AspectRatioFitter) ==
+            var mapContainer = new GameObject("MapContainer");
+            mapContainer.transform.SetParent(panel.transform, false);
+            var mcRt = mapContainer.AddComponent<RectTransform>();
+            mcRt.anchorMin = new Vector2(0f, 0f);
+            mcRt.anchorMax = new Vector2(0.6f, 0.93f);
+            mcRt.offsetMin = new Vector2(8f, 8f);
+            mcRt.offsetMax = new Vector2(-4f, -4f);
+            var arf = mapContainer.AddComponent<UnityEngine.UI.AspectRatioFitter>();
+            arf.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+            arf.aspectRatio = 1f;
+
+            // Map background (dark wilderness)
+            var mapBg = new GameObject("MapBg");
+            mapBg.transform.SetParent(mapContainer.transform, false);
+            var bgRt = mapBg.AddComponent<RectTransform>();
+            bgRt.anchorMin = Vector2.zero;
+            bgRt.anchorMax = Vector2.one;
+            bgRt.offsetMin = Vector2.zero;
+            bgRt.offsetMax = Vector2.zero;
+            mapBg.AddComponent<Image>().color = new Color(0.15f, 0.12f, 0.08f);
+
+            // Decorative border around map
+            var mapBorder = new GameObject("MapBorder");
+            mapBorder.transform.SetParent(mapContainer.transform, false);
+            var mbRt = mapBorder.AddComponent<RectTransform>();
+            mbRt.anchorMin = Vector2.zero;
+            mbRt.anchorMax = Vector2.one;
+            mbRt.offsetMin = new Vector2(-2f, -2f);
+            mbRt.offsetMax = new Vector2(2f, 2f);
+            var mbImg = mapBorder.AddComponent<Image>();
+            mbImg.color = new Color(0.35f, 0.28f, 0.18f);
+            mapBorder.transform.SetAsFirstSibling();
+
+            // ---- Draw path lines connecting adjacent regions ----
+            // Paths: Greenreach connects to all 4 outer zones; diagonal pairs
+            var paths = new[]
             {
-                "Withered Beast"   => new Color(0.6f, 0.3f, 0.15f),  // Dark brown
-                "Blight Spawn"     => new Color(0.5f, 0.8f, 0.2f),   // Sickly green
-                "Corrupted Human"  => new Color(0.7f, 0.5f, 0.7f),   // Muted purple
-                "The Untamed"      => new Color(0.8f, 0.7f, 0.4f),   // Tawny/natural
-                "Varek's Acolytes" => new Color(0.9f, 0.3f, 0.3f),   // Crimson
-                "Constructs"       => new Color(0.5f, 0.6f, 0.7f),   // Steel gray
-                _ => Color.white,
+                (0f, 0f, -55f, -55f),   // Greenreach -> Ashen
+                (0f, 0f, 55f, -55f),    // Greenreach -> Gloomtide
+                (0f, 0f, -55f, 55f),    // Greenreach -> Frosthollow
+                (0f, 0f, 55f, 55f),     // Greenreach -> Withered
+                (-55f, -55f, -55f, 55f), // Ashen -> Frosthollow (west edge)
+                (55f, -55f, 55f, 55f),   // Gloomtide -> Withered (east edge)
             };
-
-            Color npcColor = new Color(0.85f, 0.75f, 1f);
-            Color companionNpcColor = new Color(1f, 0.85f, 0.3f);
-            Color headerColor = new Color(0.95f, 0.85f, 0.5f);
-            Color dimColor = new Color(0.55f, 0.55f, 0.55f);
-            Color bossMainColor = RarityToColor(Rarity.Legendary);   // Gold
-            Color bossOptColor = RarityToColor(Rarity.Mythic);       // Mythic purple
-
-            int row = 0;
-            foreach (var r in regions)
+            foreach (var (x1, z1, x2, z2) in paths)
             {
-                // Region header
-                Color nameColor = r.blight > 0.5f ? new Color(0.8f, 0.3f, 0.3f) : new Color(0.5f, 1f, 0.5f);
-                AddRowLabel(content, $"  {r.name}   (Lv {r.lvMin}-{r.lvMax})   [{r.element}]", row, nameColor);
-                row++;
-                AddRowLabel(content, $"    {r.biome}", row, new Color(0.7f, 0.7f, 0.7f));
-                row++;
-                AddRowLabel(content, $"    Hub: {r.hub}   |   Theme: {r.theme}", row, dimColor);
-                row++;
-
-                // Blight bar
-                int barWidth = 20;
-                int filled = Mathf.RoundToInt(r.blight * barWidth);
-                string bar = "[" + new string('#', filled) + new string('-', barWidth - filled) + "]";
-                Color blightColor = Color.Lerp(new Color(0.3f, 0.8f, 0.3f), new Color(0.9f, 0.2f, 0.2f), r.blight);
-                AddRowLabel(content, $"    Blight: {bar} {r.blight * 100:F0}%", row, blightColor);
-                row++;
-
-                AddRowLabel(content, "", row, Color.white); row++;
-
-                // --- Enemies ---
-                if (regionEnemies.TryGetValue(r.name, out var enemies))
-                {
-                    AddRowLabel(content, "    --- Enemies ---", row, headerColor); row++;
-                    foreach (var (eName, eLv, eCat, eTier, eElem) in enemies)
-                    {
-                        Color enemyColor = CategoryColor(eCat);
-                        if (eTier == "Elite") enemyColor = Color.Lerp(enemyColor, Color.white, 0.3f);
-                        string elemTag = eElem != "None" ? $"  [{eElem}]" : "";
-                        AddRowLabel(content, $"    [{eTier}] {eName} (Lv {eLv})       {eCat}{elemTag}", row, enemyColor);
-                        row++;
-                    }
-                    AddRowLabel(content, "", row, Color.white); row++;
-                }
-
-                // --- Bosses ---
-                if (regionBosses.TryGetValue(r.name, out var bosses))
-                {
-                    AddRowLabel(content, "    --- Bosses ---", row, headerColor); row++;
-                    foreach (var (bName, bLv, bPhases, bMech, bOpt) in bosses)
-                    {
-                        Color bColor = bOpt ? bossOptColor : bossMainColor;
-                        string tag = bOpt ? "[Optional]" : "[Main]";
-                        AddRowLabel(content, $"    {tag}  {bName} (Lv {bLv})  {bPhases} Phases — {bMech}", row, bColor);
-                        row++;
-                    }
-                    AddRowLabel(content, "", row, Color.white); row++;
-                }
-
-                // --- Exploration ---
-                if (regionExploration.TryGetValue(r.name, out var explore))
-                {
-                    AddRowLabel(content, "    --- Exploration ---", row, headerColor); row++;
-                    AddRowLabel(content, $"    Harvest: {explore.harvest}", row, new Color(0.6f, 0.85f, 0.5f)); row++;
-                    AddRowLabel(content, $"    Rest Zone: {explore.restZone}", row, new Color(0.7f, 0.8f, 1f)); row++;
-                    AddRowLabel(content, $"    Hidden Grove: {explore.hiddenGrove}", row, new Color(0.9f, 0.7f, 1f)); row++;
-                    AddRowLabel(content, "", row, Color.white); row++;
-                }
-
-                // --- NPCs ---
-                if (regionNpcs.TryGetValue(r.name, out var npcs))
-                {
-                    AddRowLabel(content, "    --- NPCs ---", row, headerColor); row++;
-                    foreach (var (npcName, npcRole) in npcs)
-                    {
-                        bool isCompanion = npcName == "Lyra" || npcName == "Thorne"
-                            || npcName == "Selene" || npcName == "Eldara";
-                        Color color = isCompanion ? companionNpcColor : npcColor;
-                        string tag = isCompanion ? " [Companion]" : "";
-                        AddRowLabel(content, $"      * {npcName} — {npcRole}{tag}", row, color);
-                        row++;
-                    }
-                }
-
-                // Spacer between regions
-                AddRowLabel(content, "", row, Color.white); row++;
-                AddRowLabel(content, "  ────────────────────────────────────────────", row, dimColor); row++;
-                AddRowLabel(content, "", row, Color.white); row++;
+                DrawMapPath(mapContainer.transform, worldToMap(x1, z1), worldToMap(x2, z2),
+                    new Color(0.35f, 0.3f, 0.2f, 0.5f));
             }
 
-            SetContentHeight(content, row);
+            // ---- Draw biome zones ----
+            foreach (var b in biomes)
+            {
+                Vector2 bl = worldToMap(b.cx - b.half, b.cz - b.half);
+                Vector2 tr = worldToMap(b.cx + b.half, b.cz + b.half);
+                Color tinted = Color.Lerp(b.color, new Color(0.15f, 0.05f, 0.1f), b.blight * 0.5f);
+                bool isSelected = _selectedMapRegion == b.name;
+
+                // Outline (always visible, brighter if selected)
+                var outlineGo = new GameObject("Outline_" + b.name);
+                outlineGo.transform.SetParent(mapContainer.transform, false);
+                var olRt = outlineGo.AddComponent<RectTransform>();
+                olRt.anchorMin = bl;
+                olRt.anchorMax = tr;
+                olRt.offsetMin = new Vector2(-2f, -2f);
+                olRt.offsetMax = new Vector2(2f, 2f);
+                outlineGo.AddComponent<Image>().color = isSelected
+                    ? new Color(1f, 0.85f, 0.3f, 0.9f)
+                    : new Color(0.3f, 0.25f, 0.18f, 0.6f);
+
+                // Zone fill
+                var zoneGo = new GameObject("Zone_" + b.name);
+                zoneGo.transform.SetParent(mapContainer.transform, false);
+                var zoneRt = zoneGo.AddComponent<RectTransform>();
+                zoneRt.anchorMin = bl;
+                zoneRt.anchorMax = tr;
+                zoneRt.offsetMin = Vector2.zero;
+                zoneRt.offsetMax = Vector2.zero;
+                var zoneImg = zoneGo.AddComponent<Image>();
+                zoneImg.color = tinted;
+
+                // Click handler
+                var zoneBtn = zoneGo.AddComponent<Button>();
+                zoneBtn.targetGraphic = zoneImg;
+                string capName = b.name;
+                zoneBtn.onClick.AddListener(() =>
+                {
+                    _selectedMapRegion = capName;
+                    CloseActiveScreen();
+                    ShowMap();
+                });
+
+                // Inner accent — lighter center stripe to give terrain texture
+                var accentGo = new GameObject("Accent");
+                accentGo.transform.SetParent(zoneGo.transform, false);
+                var acRt = accentGo.AddComponent<RectTransform>();
+                acRt.anchorMin = new Vector2(0.15f, 0.15f);
+                acRt.anchorMax = new Vector2(0.85f, 0.85f);
+                acRt.offsetMin = Vector2.zero;
+                acRt.offsetMax = Vector2.zero;
+                var acImg = accentGo.AddComponent<Image>();
+                acImg.color = new Color(tinted.r + 0.06f, tinted.g + 0.06f, tinted.b + 0.06f, 0.4f);
+                acImg.raycastTarget = false;
+
+                // Hub marker (diamond)
+                var hubGo = new GameObject("Hub");
+                hubGo.transform.SetParent(zoneGo.transform, false);
+                var hubRt = hubGo.AddComponent<RectTransform>();
+                hubRt.anchorMin = new Vector2(0.5f, 0.38f);
+                hubRt.anchorMax = new Vector2(0.5f, 0.38f);
+                hubRt.sizeDelta = new Vector2(10f, 10f);
+                hubRt.localRotation = Quaternion.Euler(0f, 0f, 45f);
+                var hubImg = hubGo.AddComponent<Image>();
+                hubImg.color = new Color(1f, 0.9f, 0.5f);
+                hubImg.raycastTarget = false;
+
+                // Hub name label
+                var hubLabelGo = new GameObject("HubLabel");
+                hubLabelGo.transform.SetParent(zoneGo.transform, false);
+                var hlRt = hubLabelGo.AddComponent<RectTransform>();
+                hlRt.anchorMin = new Vector2(0.05f, 0.2f);
+                hlRt.anchorMax = new Vector2(0.95f, 0.38f);
+                hlRt.offsetMin = Vector2.zero;
+                hlRt.offsetMax = Vector2.zero;
+                var hlText = hubLabelGo.AddComponent<Text>();
+                hlText.text = b.hub;
+                hlText.font = _font;
+                hlText.fontSize = 9;
+                hlText.color = new Color(1f, 0.9f, 0.6f, 0.85f);
+                hlText.alignment = TextAnchor.UpperCenter;
+                hlText.horizontalOverflow = HorizontalWrapMode.Overflow;
+                hlText.raycastTarget = false;
+
+                // Region name
+                var nameGo = new GameObject("Name");
+                nameGo.transform.SetParent(zoneGo.transform, false);
+                var nRt = nameGo.AddComponent<RectTransform>();
+                nRt.anchorMin = new Vector2(0.02f, 0.58f);
+                nRt.anchorMax = new Vector2(0.98f, 0.92f);
+                nRt.offsetMin = Vector2.zero;
+                nRt.offsetMax = Vector2.zero;
+                var nText = nameGo.AddComponent<Text>();
+                nText.text = b.name;
+                nText.font = _font;
+                nText.fontSize = 13;
+                nText.fontStyle = FontStyle.Bold;
+                nText.color = Color.white;
+                nText.alignment = TextAnchor.MiddleCenter;
+                nText.horizontalOverflow = HorizontalWrapMode.Overflow;
+                nText.raycastTarget = false;
+
+                // Level + element tag
+                var tagGo = new GameObject("Tag");
+                tagGo.transform.SetParent(zoneGo.transform, false);
+                var tRt = tagGo.AddComponent<RectTransform>();
+                tRt.anchorMin = new Vector2(0.02f, 0.42f);
+                tRt.anchorMax = new Vector2(0.98f, 0.58f);
+                tRt.offsetMin = Vector2.zero;
+                tRt.offsetMax = Vector2.zero;
+                var tText = tagGo.AddComponent<Text>();
+                tText.text = $"Lv {b.lvMin}-{b.lvMax}   [{b.elem}]";
+                tText.font = _font;
+                tText.fontSize = 10;
+                tText.color = new Color(0.9f, 0.9f, 0.9f, 0.7f);
+                tText.alignment = TextAnchor.MiddleCenter;
+                tText.horizontalOverflow = HorizontalWrapMode.Overflow;
+                tText.raycastTarget = false;
+
+                // Blight indicator in corner
+                if (b.blight > 0.1f)
+                {
+                    var blGo = new GameObject("BlightDot");
+                    blGo.transform.SetParent(zoneGo.transform, false);
+                    var blRt = blGo.AddComponent<RectTransform>();
+                    blRt.anchorMin = new Vector2(0.88f, 0.85f);
+                    blRt.anchorMax = new Vector2(0.88f, 0.85f);
+                    float dotSize = 6f + b.blight * 10f;
+                    blRt.sizeDelta = new Vector2(dotSize, dotSize);
+                    Color blightDotColor = Color.Lerp(new Color(0.6f, 0.8f, 0.2f), new Color(0.9f, 0.15f, 0.15f), b.blight);
+                    var blImg = blGo.AddComponent<Image>();
+                    blImg.color = blightDotColor;
+                    blImg.raycastTarget = false;
+                }
+            }
+
+            // ---- Wilderness scatter dots (fill empty space) ----
+            var rng = new System.Random(42);
+            for (int i = 0; i < 30; i++)
+            {
+                float rx = (float)rng.NextDouble();
+                float ry = (float)rng.NextDouble();
+                // Skip dots that overlap biome zones
+                bool inBiome = false;
+                foreach (var b in biomes)
+                {
+                    Vector2 bbl = worldToMap(b.cx - b.half, b.cz - b.half);
+                    Vector2 btr = worldToMap(b.cx + b.half, b.cz + b.half);
+                    if (rx >= bbl.x && rx <= btr.x && ry >= bbl.y && ry <= btr.y) { inBiome = true; break; }
+                }
+                if (inBiome) continue;
+
+                var dotGo = new GameObject("WildDot");
+                dotGo.transform.SetParent(mapContainer.transform, false);
+                var dotRt = dotGo.AddComponent<RectTransform>();
+                dotRt.anchorMin = new Vector2(rx, ry);
+                dotRt.anchorMax = new Vector2(rx, ry);
+                float ds = 2f + (float)rng.NextDouble() * 3f;
+                dotRt.sizeDelta = new Vector2(ds, ds);
+                var dotImg = dotGo.AddComponent<Image>();
+                float g = 0.12f + (float)rng.NextDouble() * 0.08f;
+                dotImg.color = new Color(g, g * 0.9f, g * 0.7f, 0.4f);
+                dotImg.raycastTarget = false;
+            }
+
+            // ---- Fog of War overlay (parented to a layer for live rebuild) ----
+            var fogLayer = new GameObject("FogLayer");
+            fogLayer.transform.SetParent(mapContainer.transform, false);
+            var fogLayerRt = fogLayer.AddComponent<RectTransform>();
+            fogLayerRt.anchorMin = Vector2.zero;
+            fogLayerRt.anchorMax = Vector2.one;
+            fogLayerRt.offsetMin = Vector2.zero;
+            fogLayerRt.offsetMax = Vector2.zero;
+            _mapFogLayer = fogLayer.transform;
+            RebuildFogLayer();
+
+            // ---- Player blip (tracked for live position updates) ----
+            _mapBlipRt = null;
+            _mapGlowRt = null;
+            if (_sceneSetup != null && _sceneSetup.PlayerTransform != null)
+            {
+                Vector3 pPos = _sceneSetup.PlayerTransform.position;
+                Vector2 pm = worldToMap(pPos.x, pPos.z);
+
+                // Outer glow
+                var glowGo = new GameObject("PlayerGlow");
+                glowGo.transform.SetParent(mapContainer.transform, false);
+                var glRt = glowGo.AddComponent<RectTransform>();
+                glRt.anchorMin = pm;
+                glRt.anchorMax = pm;
+                glRt.sizeDelta = new Vector2(22f, 22f);
+                var glImg = glowGo.AddComponent<Image>();
+                glImg.color = new Color(0.2f, 0.8f, 1f, 0.25f);
+                glImg.raycastTarget = false;
+                _mapGlowRt = glRt;
+
+                // Blip
+                var blipGo = new GameObject("PlayerBlip");
+                blipGo.transform.SetParent(mapContainer.transform, false);
+                var bpRt = blipGo.AddComponent<RectTransform>();
+                bpRt.anchorMin = pm;
+                bpRt.anchorMax = pm;
+                bpRt.sizeDelta = new Vector2(12f, 12f);
+                var bpImg = blipGo.AddComponent<Image>();
+                bpImg.color = new Color(0.2f, 0.9f, 1f);
+                bpImg.raycastTarget = false;
+                _mapBlipRt = bpRt;
+
+                // White center
+                var ctrGo = new GameObject("BlipCenter");
+                ctrGo.transform.SetParent(blipGo.transform, false);
+                var ctrRt = ctrGo.AddComponent<RectTransform>();
+                ctrRt.anchorMin = new Vector2(0.25f, 0.25f);
+                ctrRt.anchorMax = new Vector2(0.75f, 0.75f);
+                ctrRt.offsetMin = Vector2.zero;
+                ctrRt.offsetMax = Vector2.zero;
+                var ctrImg = ctrGo.AddComponent<Image>();
+                ctrImg.color = Color.white;
+                ctrImg.raycastTarget = false;
+            }
+
+            // ---- Compass labels ----
+            string[] dirs = { "N", "S", "W", "E" };
+            Vector2[] dAnch = { new Vector2(0.5f, 0.97f), new Vector2(0.5f, 0.03f), new Vector2(0.03f, 0.5f), new Vector2(0.97f, 0.5f) };
+            for (int d = 0; d < 4; d++)
+            {
+                var cGo = new GameObject("Compass_" + dirs[d]);
+                cGo.transform.SetParent(mapContainer.transform, false);
+                var cRt = cGo.AddComponent<RectTransform>();
+                cRt.anchorMin = dAnch[d];
+                cRt.anchorMax = dAnch[d];
+                cRt.sizeDelta = new Vector2(20f, 18f);
+                var cText = cGo.AddComponent<Text>();
+                cText.text = dirs[d];
+                cText.font = _font;
+                cText.fontSize = 14;
+                cText.fontStyle = d == 0 ? FontStyle.Bold : FontStyle.Normal;
+                cText.color = d == 0 ? new Color(1f, 0.85f, 0.5f, 0.8f) : new Color(0.6f, 0.6f, 0.6f, 0.5f);
+                cText.alignment = TextAnchor.MiddleCenter;
+                cText.raycastTarget = false;
+            }
+
+            // ---- Legend bar at bottom of map ----
+            var legendGo = new GameObject("Legend");
+            legendGo.transform.SetParent(mapContainer.transform, false);
+            var legRt = legendGo.AddComponent<RectTransform>();
+            legRt.anchorMin = new Vector2(0.05f, 0f);
+            legRt.anchorMax = new Vector2(0.95f, 0f);
+            legRt.pivot = new Vector2(0.5f, 1f);
+            legRt.anchoredPosition = new Vector2(0f, -4f);
+            legRt.sizeDelta = new Vector2(0f, 16f);
+            var legText = legendGo.AddComponent<Text>();
+            legText.text = "[ ] = Region     <> = Hub     * = Player";
+            legText.font = _font;
+            legText.fontSize = 10;
+            legText.color = new Color(0.5f, 0.5f, 0.5f, 0.7f);
+            legText.alignment = TextAnchor.MiddleCenter;
+            legText.raycastTarget = false;
+
+            // == RIGHT: Region info panel ==
+            var infoPanel = new GameObject("InfoPanel");
+            infoPanel.transform.SetParent(panel.transform, false);
+            var infoPanelRt = infoPanel.AddComponent<RectTransform>();
+            infoPanelRt.anchorMin = new Vector2(0.61f, 0f);
+            infoPanelRt.anchorMax = new Vector2(1f, 0.93f);
+            infoPanelRt.offsetMin = new Vector2(4f, 8f);
+            infoPanelRt.offsetMax = new Vector2(-8f, -4f);
+            infoPanel.AddComponent<Image>().color = new Color(0.06f, 0.06f, 0.1f, 0.92f);
+
+            var infoContent = CreateScrollContent(infoPanel.transform, new Vector2(0f, 0f), new Vector2(1f, 1f));
+            int row = 0;
+
+            if (string.IsNullOrEmpty(_selectedMapRegion))
+            {
+                AddRowLabel(infoContent, "", row, Color.white); row++;
+                AddRowLabel(infoContent, "  Select a region", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+                AddRowLabel(infoContent, "  on the map to", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+                AddRowLabel(infoContent, "  view details.", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+                AddRowLabel(infoContent, "", row, Color.white); row++;
+                AddRowLabel(infoContent, "  Player position", row, new Color(0.2f, 0.9f, 1f)); row++;
+                if (_sceneSetup != null && _sceneSetup.PlayerTransform != null)
+                {
+                    var pp = _sceneSetup.PlayerTransform.position;
+                    AddRowLabel(infoContent, $"  ({pp.x:F0}, {pp.z:F0})", row, new Color(0.2f, 0.9f, 1f)); row++;
+                }
+            }
+            else
+            {
+                var sel = System.Array.Find(biomes, b => b.name == _selectedMapRegion);
+                bool regionVisited = _visitedRegions.Contains(_selectedMapRegion);
+                Color nameCol = sel.blight > 0.5f ? new Color(0.9f, 0.35f, 0.35f) : new Color(0.5f, 1f, 0.5f);
+
+                if (!regionVisited)
+                {
+                    // Unexplored region — show minimal info
+                    AddRowLabel(infoContent, $"  ??? -- Unexplored", row, new Color(0.5f, 0.5f, 0.5f)); row++;
+                    AddRowLabel(infoContent, "", row, Color.white); row++;
+                    AddRowLabel(infoContent, "  This region has not", row, new Color(0.6f, 0.6f, 0.6f)); row++;
+                    AddRowLabel(infoContent, "  been visited yet.", row, new Color(0.6f, 0.6f, 0.6f)); row++;
+                    AddRowLabel(infoContent, "", row, Color.white); row++;
+                    AddRowLabel(infoContent, "  Travel there to", row, new Color(0.6f, 0.6f, 0.6f)); row++;
+                    AddRowLabel(infoContent, "  reveal details.", row, new Color(0.6f, 0.6f, 0.6f)); row++;
+                }
+                else
+                {
+                    // Header
+                    AddRowLabel(infoContent, $"  {sel.name}", row, nameCol); row++;
+                    AddRowLabel(infoContent, $"  Lv {sel.lvMin}-{sel.lvMax}   [{sel.elem}]", row, new Color(0.75f, 0.75f, 0.75f)); row++;
+                    AddRowLabel(infoContent, $"  Hub: {sel.hub}", row, new Color(0.8f, 0.85f, 1f)); row++;
+
+                    // Blight bar
+                    int bw = 15;
+                    int bf = Mathf.RoundToInt(sel.blight * bw);
+                    string bBar = "[" + new string('#', bf) + new string('-', bw - bf) + "]";
+                    Color blCol = Color.Lerp(new Color(0.3f, 0.8f, 0.3f), new Color(0.9f, 0.2f, 0.2f), sel.blight);
+                    AddRowLabel(infoContent, $"  Blight {bBar} {sel.blight * 100:F0}%", row, blCol); row++;
+
+                    AddRowLabel(infoContent, "", row, Color.white); row++;
+
+                    // Enemies
+                    if (regionEnemies.TryGetValue(sel.name, out var enemies))
+                    {
+                        AddRowLabel(infoContent, "  -- Enemies --", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+                        foreach (var (eName, eLv, eTier) in enemies)
+                        {
+                            Color ec = eTier == "Elite" ? new Color(1f, 0.85f, 0.3f) : Color.white;
+                            AddRowLabel(infoContent, $"  [{eTier}] {eName} Lv{eLv}", row, ec); row++;
+                        }
+                        AddRowLabel(infoContent, "", row, Color.white); row++;
+                    }
+
+                    // Bosses
+                    if (regionBosses.TryGetValue(sel.name, out var bosses))
+                    {
+                        AddRowLabel(infoContent, "  -- Bosses --", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+                        foreach (var (bName, bLv, bOpt) in bosses)
+                        {
+                            Color bc = bOpt ? RarityToColor(Rarity.Mythic) : RarityToColor(Rarity.Legendary);
+                            string tag = bOpt ? "[Opt]" : "[Main]";
+                            AddRowLabel(infoContent, $"  {tag} {bName} Lv{bLv}", row, bc); row++;
+                        }
+                        AddRowLabel(infoContent, "", row, Color.white); row++;
+                    }
+
+                    // NPCs
+                    if (regionNpcs.TryGetValue(sel.name, out var npcs))
+                    {
+                        AddRowLabel(infoContent, "  -- NPCs --", row, new Color(0.95f, 0.85f, 0.5f)); row++;
+                        foreach (var (nName, nRole) in npcs)
+                        {
+                            bool isComp = nRole == "Companion";
+                            Color nc = isComp ? new Color(1f, 0.85f, 0.3f) : new Color(0.85f, 0.75f, 1f);
+                            string cTag = isComp ? " *" : "";
+                            AddRowLabel(infoContent, $"  {nName}{cTag}", row, nc); row++;
+                            AddRowLabel(infoContent, $"    {nRole}", row, new Color(0.55f, 0.55f, 0.55f)); row++;
+                        }
+                        AddRowLabel(infoContent, "", row, Color.white); row++;
+                    }
+
+                    // Warp button
+                    if (_sceneSetup != null && _sceneSetup.PlayerTransform != null)
+                    {
+                        Vector3 warpTarget = new Vector3(sel.cx, 0f, sel.cz);
+                        AddRowLabel(infoContent, "  Travel to region", row, new Color(0.6f, 0.85f, 1f));
+                        AddButton(infoContent, "Warp", row, () =>
+                        {
+                            var cc = _sceneSetup.PlayerTransform.GetComponent<CharacterController>();
+                            if (cc != null) { cc.enabled = false; _sceneSetup.PlayerTransform.position = warpTarget; cc.enabled = true; }
+                            else _sceneSetup.PlayerTransform.position = warpTarget;
+                            Debug.Log($"[Map] Warped to {sel.name}");
+                            CloseActiveScreen();
+                            ShowMap();
+                        }); row++;
+                    }
+                }
+            }
+
+            SetContentHeight(infoContent, row);
+        }
+
+        private void DrawMapPath(Transform parent, Vector2 from, Vector2 to, Color color)
+        {
+            // Draw a line between two anchor-space points using a rotated thin rect
+            var go = new GameObject("Path");
+            go.transform.SetParent(parent, false);
+            var rt = go.AddComponent<RectTransform>();
+
+            // Midpoint in anchor space
+            Vector2 mid = (from + to) * 0.5f;
+            rt.anchorMin = mid;
+            rt.anchorMax = mid;
+
+            // We need pixel-space distance. Estimate from parent rect.
+            // Since anchors are 0..1, we scale by parent size at layout time.
+            // Use a trick: set anchors to endpoints and use a thin height.
+            // Simpler approach: place at midpoint, rotate, set width to approximate distance.
+            var parentRt = parent.GetComponent<RectTransform>();
+            Vector2 pSize = parentRt.rect.size;
+            if (pSize.x < 1f) pSize = new Vector2(500f, 500f); // fallback before layout
+
+            Vector2 fromPx = from * pSize;
+            Vector2 toPx = to * pSize;
+            float dist = Vector2.Distance(fromPx, toPx);
+            float angle = Mathf.Atan2(toPx.y - fromPx.y, toPx.x - fromPx.x) * Mathf.Rad2Deg;
+
+            rt.sizeDelta = new Vector2(dist, 3f);
+            rt.localRotation = Quaternion.Euler(0f, 0f, angle);
+
+            var img = go.AddComponent<Image>();
+            img.color = color;
+            img.raycastTarget = false;
         }
 
         // ================================================================
@@ -2566,6 +3369,103 @@ namespace SoR.Testing
         }
 
         // ================================================================
+        // TITLES SCREEN
+        // ================================================================
+
+        private void ShowTitles()
+        {
+            var panel = CreateScreenPanel("Titles");
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
+
+            int row = 0;
+            Color headerColor = new Color(1f, 0.85f, 0.4f);
+            Color equippedColor = new Color(0.4f, 1f, 0.4f);
+            Color lockedColor = new Color(0.5f, 0.5f, 0.5f);
+
+            // ---- Equipped Title ----
+            AddRowLabel(content, "  --- Equipped Title ---", row, headerColor); row++;
+            string equippedId = _titleSystem.EquippedTitleId;
+            if (!string.IsNullOrEmpty(equippedId))
+            {
+                var equipped = _testTitles.Find(t => t.TitleId == equippedId);
+                if (equipped != null)
+                {
+                    AddRowLabel(content, $"  {equipped.TitleName}", row, equippedColor); row++;
+                    AddRowLabel(content, $"    Passive: {equipped.Description}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+                    AddRowLabel(content, $"    Stats: {FormatStatBonuses(equipped.StatBonuses)}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+                    AddRowLabel(content, "", row, Color.white);
+                    AddButton(content, "Unequip", row, () =>
+                    {
+                        _titleSystem.UnequipTitle();
+                        CloseActiveScreen(); ShowTitles();
+                    }); row++;
+                }
+            }
+            else
+            {
+                AddRowLabel(content, "  (none)", row, lockedColor); row++;
+            }
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- Category sections ----
+            var categories = new[]
+            {
+                ("Farming", new[] { "seedling", "greenhand", "master_cultivator", "son_of_the_soil", "last_farmer_of_millhaven" }),
+                ("Combat", new[] { "reluctant_blade", "scarecrow", "blight_reaper", "warden_of_the_green", "legend_of_eldrath" }),
+                ("Exploration & Social", new[] { "wanderer", "lorekeep", "the_peoples_champion", "herbalist_supreme", "accord_keeper" }),
+            };
+
+            foreach (var (catName, titleIds) in categories)
+            {
+                AddRowLabel(content, $"  --- {catName} ---", row, headerColor); row++;
+
+                foreach (var titleId in titleIds)
+                {
+                    var def = _testTitles.Find(t => t.TitleId == titleId);
+                    if (def == null) continue;
+
+                    bool unlocked = _titleSystem.UnlockedTitleIds.Contains(titleId);
+                    bool isEquipped = _titleSystem.EquippedTitleId == titleId;
+
+                    string tag = isEquipped ? "  [EQUIPPED]" : !unlocked ? "  [LOCKED]" : "";
+                    Color nameColor = isEquipped ? equippedColor : unlocked ? Color.white : lockedColor;
+
+                    AddRowLabel(content, $"  {def.TitleName}{tag}", row, nameColor); row++;
+                    AddRowLabel(content, $"    Passive: {def.Description}", row, unlocked ? new Color(0.8f, 0.8f, 0.8f) : lockedColor); row++;
+                    AddRowLabel(content, $"    Stats: {FormatStatBonuses(def.StatBonuses)}", row, unlocked ? new Color(0.8f, 0.8f, 0.8f) : lockedColor); row++;
+                    AddRowLabel(content, $"    Unlock: {def.UnlockCondition}", row, unlocked ? new Color(0.6f, 0.8f, 0.6f) : lockedColor); row++;
+
+                    if (unlocked && !isEquipped)
+                    {
+                        string capturedId = titleId;
+                        AddRowLabel(content, "", row, Color.white);
+                        AddButton(content, "Equip", row, () =>
+                        {
+                            _titleSystem.EquipTitle(capturedId);
+                            CloseActiveScreen(); ShowTitles();
+                        }); row++;
+                    }
+
+                    AddRowLabel(content, "", row, Color.white); row++;
+                }
+            }
+
+            SetContentHeight(content, row);
+        }
+
+        private string FormatStatBonuses(StatBlock stats)
+        {
+            var parts = new List<string>();
+            if (stats.Vigor != 0) parts.Add($"VIG +{stats.Vigor:F0}");
+            if (stats.Strength != 0) parts.Add($"STR +{stats.Strength:F0}");
+            if (stats.Harvest != 0) parts.Add($"HAR +{stats.Harvest:F0}");
+            if (stats.Verdance != 0) parts.Add($"VER +{stats.Verdance:F0}");
+            if (stats.Agility != 0) parts.Add($"AGI +{stats.Agility:F0}");
+            if (stats.Resilience != 0) parts.Add($"RES +{stats.Resilience:F0}");
+            return parts.Count > 0 ? string.Join(", ", parts) : "None";
+        }
+
+        // ================================================================
         // CHEAT MENU
         // ================================================================
 
@@ -2882,17 +3782,12 @@ namespace SoR.Testing
             AddRowLabel(content, "  Unlock all companions", row, cheatColor);
             AddButton(content, "Unlock", row, () =>
             {
-                string[] allCompanions = {
-                    "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
-                    "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
-                    "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
-                };
-                foreach (var id in allCompanions)
+                foreach (var id in CompanionRegistry.Keys)
                 {
                     _gacha.RegisterOwnedCompanion(id);
                     _unlockedCompanions.Add(id);
-                    if (!_gachaLog.Exists(e => e.Contains(FormatItemName(id))))
-                        _gachaLog.Insert(0, $"{RarityStars(GetCompanionRarity(id))} {FormatItemName(id)} NEW!");
+                    if (!_gachaLog.Exists(e => e.Contains(GetCompanionDisplayName(id))))
+                        _gachaLog.Insert(0, $"{RarityStars(GetCompanionRarity(id))} {GetCompanionDisplayName(id)} NEW!");
                 }
                 Debug.Log("[Cheat] All companions unlocked");
                 CloseActiveScreen(); ShowCheatMenu();
@@ -2913,12 +3808,7 @@ namespace SoR.Testing
             AddRowLabel(content, "  Level all companions to max (45)", row, cheatColor);
             AddButton(content, "Max All", row, () =>
             {
-                string[] allCompanions = {
-                    "companion_villager", "companion_farmer", "companion_scout", "companion_apprentice",
-                    "companion_knight", "companion_pyromancer", "companion_ranger", "companion_priest",
-                    "companion_lyra", "companion_thorne", "companion_selene", "companion_eldara"
-                };
-                foreach (var id in allCompanions)
+                foreach (var id in CompanionRegistry.Keys)
                     _companionLevels[id] = 45;
                 // Respawn active companions at new level
                 if (_sceneSetup != null)
@@ -2992,27 +3882,73 @@ namespace SoR.Testing
 
             AddRowLabel(content, "", row, Color.white); row++;
 
-            // ---- PITY RESET ----
-            AddRowLabel(content, "  --- Gacha ---", row, headerColor); row++;
+            // ---- TITLES ----
+            AddRowLabel(content, "  --- Titles ---", row, headerColor); row++;
 
-            AddRowLabel(content, "  Reset pity counters", row, cheatColor);
-            AddButton(content, "Reset", row, () =>
+            int unlockedCount = _titleSystem.UnlockedTitleIds.Count;
+            AddRowLabel(content, $"  Unlocked: {unlockedCount} / {_testTitles.Count}", row, cheatColor); row++;
+
+            AddRowLabel(content, "  Unlock all titles", row, cheatColor);
+            AddButton(content, "Unlock All", row, () =>
             {
-                var pity = _gacha.GetPityTracker(_testBanner.BannerId);
-                pity.ResetLegendaryPity();
-                pity.ResetMythicPity();
-                pity.TotalPulls = 0;
-                pity.LostLastFiftyFifty = false;
-                Debug.Log("[Cheat] Pity reset");
+                foreach (var t in _testTitles)
+                    _titleSystem.UnlockTitle(t.TitleId);
+                Debug.Log("[Cheat] All titles unlocked");
                 CloseActiveScreen(); ShowCheatMenu();
             }); row++;
 
-            AddRowLabel(content, "  Set pity to 89 (next = guaranteed 5-star)", row, cheatColor);
-            AddButton(content, "Set 89", row, () =>
+            AddRowLabel(content, "  Unequip current title", row, cheatColor);
+            AddButton(content, "Unequip", row, () =>
             {
-                var pity = _gacha.GetPityTracker(_testBanner.BannerId);
-                pity.PullsSinceLegendary = 89;
-                Debug.Log("[Cheat] Pity set to 89");
+                _titleSystem.UnequipTitle();
+                Debug.Log("[Cheat] Title unequipped");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- PITY RESET ----
+            AddRowLabel(content, "  --- Gacha ---", row, headerColor); row++;
+
+            AddRowLabel(content, "  Reset pity counters (all banners)", row, cheatColor);
+            AddButton(content, "Reset", row, () =>
+            {
+                foreach (var b in _testBanners)
+                {
+                    var p = _gacha.GetPityTracker(b.BannerId);
+                    p.ResetLegendaryPity();
+                    p.ResetMythicPity();
+                    p.TotalPulls = 0;
+                    p.LostLastFiftyFifty = false;
+                }
+                Debug.Log("[Cheat] Pity reset on all banners");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Set pity to 59 (next = guaranteed 5★)", row, cheatColor);
+            AddButton(content, "Set 59", row, () =>
+            {
+                foreach (var b in _testBanners)
+                {
+                    var p = _gacha.GetPityTracker(b.BannerId);
+                    p.PullsSinceLegendary = 59;
+                }
+                Debug.Log("[Cheat] Pity set to 59 on all banners");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, $"  Starseeds: {_starseeds}", row, cheatColor);
+            AddCheatValueButtons(content, row, new[] { 160f, 1440f, 5000f, 50000f }, v =>
+            {
+                _starseeds = (int)v;
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Add 5000 Starseeds", row, cheatColor);
+            AddButton(content, "+5000", row, () =>
+            {
+                _starseeds += 5000;
+                Debug.Log($"[Cheat] Added 5000 Starseeds (now {_starseeds})");
                 CloseActiveScreen(); ShowCheatMenu();
             }); row++;
 
@@ -3037,6 +3973,40 @@ namespace SoR.Testing
                     CloseActiveScreen(); ShowCheatMenu();
                 }); row++;
             }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- FOG OF WAR ----
+            AddRowLabel(content, "  --- Fog of War ---", row, headerColor); row++;
+
+            int revealedCount = _revealedFogCells.Count;
+            int totalCells = FogGridRes * FogGridRes;
+            AddRowLabel(content, $"  Revealed: {revealedCount}/{totalCells} cells", row, cheatColor); row++;
+            AddRowLabel(content, $"  Visited regions: {_visitedRegions.Count}/5", row, cheatColor); row++;
+
+            AddRowLabel(content, "  Reveal entire map", row, cheatColor);
+            AddButton(content, "Reveal All", row, () =>
+            {
+                for (int i = 0; i < FogGridRes * FogGridRes; i++)
+                    _revealedFogCells.Add(i);
+                _visitedRegions.Add("Greenreach Valley");
+                _visitedRegions.Add("The Ashen Steppe");
+                _visitedRegions.Add("Gloomtide Marshes");
+                _visitedRegions.Add("Frosthollow Peaks");
+                _visitedRegions.Add("The Withered Heart");
+                Debug.Log("[Cheat] Revealed all map cells and regions");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Reset fog (re-hide map)", row, new Color(1f, 0.3f, 0.3f));
+            AddButton(content, "Reset Fog", row, () =>
+            {
+                _revealedFogCells.Clear();
+                _visitedRegions.Clear();
+                RevealFogAroundPlayer();
+                Debug.Log("[Cheat] Fog reset — only current position revealed");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
 
             AddRowLabel(content, "", row, Color.white); row++;
 
@@ -3163,18 +4133,111 @@ namespace SoR.Testing
             }
         }
 
-        private List<(string id, string name, Rarity rarity)> BuildWheelCompanions()
+        // ================================================================
+        // Companion Registry — all 32 GDD companions
+        // ================================================================
+
+        private static readonly Dictionary<string, (string Name, string Class, string Element)> CompanionRegistry = new()
+        {
+            // 5★ Legendary (10)
+            { "companion_seraphine",   ("Seraphine Dawnveil",   "Magician",        "Pyro")    },
+            { "companion_korrath",     ("Korrath the Unbroken", "Axe Warden",      "Geo")     },
+            { "companion_yuki",        ("Yuki Frostwhisper",    "Archer",          "Frost")   },
+            { "companion_theron",      ("Theron Ashblood",      "Necromancer",     "Umbral")  },
+            { "companion_lyssara",     ("Lyssara Tidecaller",   "Cleric",          "Hydro")   },
+            { "companion_vex",         ("Vex Stormfang",        "Duelist",         "Volt")    },
+            { "companion_orin",        ("Orin Ironroot",        "Shieldbearer",    "Verdant") },
+            { "companion_zara",        ("Zara Emberlance",      "Lancer",          "Pyro")    },
+            { "companion_malachai",    ("Malachai Voidweaver",  "Magician",        "Umbral")  },
+            { "companion_kaelen",      ("Kaelen Windrider",     "Crossbow Knight", "Volt")    },
+
+            // 4★ Epic (12)
+            { "companion_brynn",       ("Brynn Ashford",        "Swordsman",       "Pyro")    },
+            { "companion_hale",        ("Hale Deeproot",        "Shieldbearer",    "Verdant") },
+            { "companion_nix",         ("Nix Shadewalker",      "Duelist",         "Umbral")  },
+            { "companion_petra",       ("Petra Stoneheart",     "Axe Warden",      "Geo")     },
+            { "companion_elara",       ("Elara Mistbow",        "Archer",          "Hydro")   },
+            { "companion_fenwick",     ("Fenwick Bonespark",    "Necromancer",     "Volt")    },
+            { "companion_maeven",      ("Sister Maeven",        "Cleric",          "Frost")   },
+            { "companion_rook",        ("Rook Galehammer",      "Lancer",          "Verdant") },
+            { "companion_denna",       ("Denna Sparkshot",      "Crossbow Knight", "Pyro")    },
+            { "companion_cassius",     ("Cassius Ironvow",      "Swordsman",       "Frost")   },
+            { "companion_wren",        ("Wren Hollowgaze",      "Magician",        "Verdant") },
+            { "companion_jareth",      ("Jareth Duskblade",     "Duelist",         "Pyro")    },
+
+            // 3★ Rare (10)
+            { "companion_tomas",       ("Tomas Fieldhand",      "Swordsman",       "Verdant") },
+            { "companion_berta",       ("Berta Coalfist",       "Axe Warden",      "Pyro")    },
+            { "companion_pip",         ("Pip Quickfingers",     "Duelist",         "Volt")    },
+            { "companion_marsh",       ("Old Marsh",            "Shieldbearer",    "Hydro")   },
+            { "companion_willow",      ("Willow Softbow",       "Archer",          "Verdant") },
+            { "companion_emmet",       ("Emmet Rattlebones",    "Necromancer",     "Umbral")  },
+            { "companion_lira",        ("Novice Lira",          "Cleric",          "Hydro")   },
+            { "companion_bruno",       ("Bruno Ashpike",        "Lancer",          "Pyro")    },
+            { "companion_mira",        ("Mira Boltstring",      "Crossbow Knight", "Volt")    },
+            { "companion_sage",        ("Sage Dustweave",       "Magician",        "Umbral")  },
+        };
+
+        private static readonly HashSet<string> FiveStarIds = new()
+        {
+            "companion_seraphine", "companion_korrath", "companion_yuki", "companion_theron",
+            "companion_lyssara", "companion_vex", "companion_orin", "companion_zara",
+            "companion_malachai", "companion_kaelen"
+        };
+
+        private static readonly HashSet<string> FourStarIds = new()
+        {
+            "companion_brynn", "companion_hale", "companion_nix", "companion_petra",
+            "companion_elara", "companion_fenwick", "companion_maeven", "companion_rook",
+            "companion_denna", "companion_cassius", "companion_wren", "companion_jareth"
+        };
+
+        private static string GetCompanionDisplayName(string id)
+        {
+            if (CompanionRegistry.TryGetValue(id, out var info))
+                return info.Name;
+            return FormatItemName(id);
+        }
+
+        private bool CanAffordPull(int count)
+        {
+            int cost = count == 1 ? StarseedCostSingle : StarseedCost10Pull;
+            return _starseeds >= cost;
+        }
+
+        private void SpendStarseeds(int count)
+        {
+            int cost = count == 1 ? StarseedCostSingle : StarseedCost10Pull;
+            _starseeds -= cost;
+        }
+
+        private void RecordWishHistory(GachaPullResult result, BannerDefinitionSO banner)
+        {
+            int pullNum = _wishHistory.Count + 1;
+            _wishHistory.Insert(0, (result.CompanionId, result.Rarity, result.IsDuplicate, banner.BannerName, pullNum));
+        }
+
+        private void LogPullResult(GachaPullResult result)
+        {
+            string star = RarityStars(result.Rarity);
+            string name = GetCompanionDisplayName(result.CompanionId);
+            string dup = result.IsDuplicate ? " (DUP)" : " NEW!";
+            _gachaLog.Insert(0, $"{star} {name}{dup}");
+            if (_gachaLog.Count > 30) _gachaLog.RemoveAt(30);
+        }
+
+        private List<(string id, string name, Rarity rarity)> BuildWheelCompanions(BannerDefinitionSO banner)
         {
             var list = new List<(string, string, Rarity)>();
             void AddPool(List<string> pool, Rarity rarity)
             {
                 foreach (var id in pool)
-                    list.Add((id, FormatItemName(id), rarity));
+                    list.Add((id, GetCompanionDisplayName(id), rarity));
             }
-            AddPool(_testBanner.CommonPool, Rarity.Common);
-            AddPool(_testBanner.RarePool, Rarity.Rare);
-            AddPool(_testBanner.LegendaryPool, Rarity.Legendary);
-            AddPool(_testBanner.MythicPool, Rarity.Mythic);
+            AddPool(banner.CommonPool, Rarity.Common);
+            AddPool(banner.RarePool, Rarity.Rare);
+            AddPool(banner.LegendaryPool, Rarity.Legendary);
+            AddPool(banner.MythicPool, Rarity.Mythic);
             return list;
         }
 
@@ -3190,9 +4253,8 @@ namespace SoR.Testing
 
         private static Rarity GetCompanionRarity(string id)
         {
-            if (id.Contains("eldara")) return Rarity.Mythic;
-            if (id.Contains("lyra") || id.Contains("thorne") || id.Contains("selene")) return Rarity.Legendary;
-            if (id.Contains("knight") || id.Contains("pyromancer") || id.Contains("ranger") || id.Contains("priest")) return Rarity.Rare;
+            if (FiveStarIds.Contains(id)) return Rarity.Legendary;
+            if (FourStarIds.Contains(id)) return Rarity.Rare;
             return Rarity.Common;
         }
 
@@ -3436,11 +4498,11 @@ namespace SoR.Testing
 
         private static string RarityStars(Rarity r) => r switch
         {
-            Rarity.Common => "*",
-            Rarity.Rare => "**",
-            Rarity.Legendary => "***",
-            Rarity.Mythic => "****",
-            _ => "*"
+            Rarity.Common => "★★★",
+            Rarity.Rare => "★★★★",
+            Rarity.Legendary => "★★★★★",
+            Rarity.Mythic => "★★★★★★",
+            _ => "★★★"
         };
 
         private static Color RarityToColor(Rarity r) => r switch
@@ -3483,10 +4545,17 @@ namespace SoR.Testing
         {
             if (_unlockedCompanions.Contains(companionId))
                 return true;
-            // Check the gacha log for any pull of this companion
+            // Check the wish history for any pull of this companion
+            foreach (var entry in _wishHistory)
+            {
+                if (entry.companionId == companionId)
+                    return true;
+            }
+            // Fallback: check the gacha log for any pull of this companion
+            string displayName = GetCompanionDisplayName(companionId);
             foreach (var entry in _gachaLog)
             {
-                if (entry.Contains(FormatItemName(companionId)))
+                if (entry.Contains(displayName))
                     return true;
             }
             return false;
@@ -3675,6 +4744,17 @@ namespace SoR.Testing
             foreach (var (itemId, qty, xp, gold) in rewards)
                 quest.Rewards.Add(new QuestReward { ItemId = itemId, Quantity = qty, XP = xp, Gold = gold });
             return quest;
+        }
+
+        private void CreateTitle(string id, string name, string passive, string unlockCondition, StatBlock stats)
+        {
+            var def = ScriptableObject.CreateInstance<TitleDefinitionSO>();
+            def.TitleId = id;
+            def.TitleName = name;
+            def.Description = passive;
+            def.UnlockCondition = unlockCondition;
+            def.StatBonuses = stats;
+            _testTitles.Add(def);
         }
     }
 }
