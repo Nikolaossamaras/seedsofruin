@@ -7,6 +7,7 @@ using SoR.Combat;
 using SoR.Core;
 using SoR.Gameplay;
 using SoR.Shared;
+using SoR.Systems.Inventory;
 
 namespace SoR.Testing
 {
@@ -23,6 +24,11 @@ namespace SoR.Testing
         private PlayerStatsSO _playerStats;
         private WeaponDefinitionSO _testWeapon;
         private Camera _mainCamera;
+
+        // ---- equipment visuals ----
+        private GameObject _weaponVisual;
+        private Transform _weaponMount;
+        private readonly Dictionary<EquipmentSlot, GameObject> _armorVisuals = new();
 
         // ---- HUD ----
         private Image _healthFill;
@@ -41,7 +47,12 @@ namespace SoR.Testing
         public float PlayerMaxVerdance { get => _playerMaxVerdance; set { _playerMaxVerdance = value; _playerVerdance = Mathf.Min(_playerVerdance, value); } }
         public PlayerStatsSO PlayerStats => _playerStats;
         public WeaponDefinitionSO TestWeapon => _testWeapon;
-        public void SetActiveWeapon(WeaponDefinitionSO weapon) { if (weapon != null) _testWeapon = weapon; }
+        public void SetActiveWeapon(WeaponDefinitionSO weapon)
+        {
+            if (weapon == null) return;
+            _testWeapon = weapon;
+            RebuildWeaponVisual();
+        }
         public bool GodMode { get; set; }
         public bool OneHitKill { get; set; }
         public Transform PlayerTransform => _player != null ? _player.transform : null;
@@ -664,14 +675,19 @@ namespace SoR.Testing
                     : CreateMaterial(new Color(0.2f, 0.4f, 0.9f));
             }
 
-            // Weapon model — try loading and parent to WeaponMount or model root
+            // Weapon mount point (right hand area)
+            var weaponMountGO = new GameObject("WeaponMount");
+            weaponMountGO.transform.SetParent(playerVisual.transform, false);
+            weaponMountGO.transform.localPosition = new Vector3(0.35f, 0.3f, 0.3f);
+            _weaponMount = weaponMountGO.transform;
+
+            // Weapon model — try prefab first, fall back to procedural shape
             var weaponPrefab = TryLoadAsset<GameObject>("TestAssets/Weapons/WeaponModel");
             if (weaponPrefab != null)
             {
-                var mountPoint = playerVisual.transform.Find("WeaponMount") ?? playerVisual.transform;
-                var weapon = Instantiate(weaponPrefab, mountPoint, false);
-                weapon.name = "WeaponModel";
-                StripColliders(weapon);
+                _weaponVisual = Instantiate(weaponPrefab, _weaponMount, false);
+                _weaponVisual.name = "WeaponModel";
+                StripColliders(_weaponVisual);
             }
 
             // CharacterController
@@ -733,6 +749,18 @@ namespace SoR.Testing
             _testWeapon.DamageType = DamageType.Physical;
             _testWeapon.Element = Element.None;
             _testWeapon.MaxComboHits = 3;
+
+            // Create fallback weapon visual if no prefab was loaded
+            if (_weaponVisual == null)
+                RebuildWeaponVisual();
+
+            // Initial armor visual (leather_helm is equipped at startup via TestMenuUI)
+            var headVisual = CreateArmorVisual(EquipmentSlot.Head);
+            if (headVisual != null)
+                _armorVisuals[EquipmentSlot.Head] = headVisual;
+
+            // Listen for equipment changes
+            EventBus.Subscribe<EquipmentChangedEvent>(OnEquipmentChanged);
         }
 
         private void CreateEnemies()
@@ -1686,6 +1714,216 @@ namespace SoR.Testing
             // Apply cooldown reduction to weapon attack speed
             if (_testWeapon != null)
                 _testWeapon.AttackSpeed = 1.2f + _partyCooldownReduction;
+        }
+
+        // ================================================================
+        // Equipment Visuals
+        // ================================================================
+
+        private void RebuildWeaponVisual()
+        {
+            if (_weaponVisual != null)
+                Object.Destroy(_weaponVisual);
+
+            if (_testWeapon == null || _weaponMount == null) return;
+
+            _weaponVisual = CreateWeaponVisual(_testWeapon.WeaponType, _testWeapon.Element);
+            _weaponVisual.transform.SetParent(_weaponMount, false);
+        }
+
+        private void OnEquipmentChanged(EquipmentChangedEvent e)
+        {
+            if (e.Slot == EquipmentSlot.Weapon) return; // handled by SetActiveWeapon
+
+            if (_armorVisuals.TryGetValue(e.Slot, out var old) && old != null)
+                Object.Destroy(old);
+            _armorVisuals.Remove(e.Slot);
+
+            if (!string.IsNullOrEmpty(e.ItemId))
+            {
+                var visual = CreateArmorVisual(e.Slot);
+                if (visual != null)
+                    _armorVisuals[e.Slot] = visual;
+            }
+        }
+
+        private GameObject CreateWeaponVisual(WeaponType type, Element element)
+        {
+            var root = new GameObject($"WeaponVisual_{type}");
+            var handleColor = new Color(0.35f, 0.25f, 0.15f);
+            var bladeColor = element == Element.None
+                ? new Color(0.6f, 0.6f, 0.6f)
+                : ElementToColor(element);
+
+            switch (type)
+            {
+                case WeaponType.Scythe:
+                {
+                    var shaft = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    shaft.name = "Shaft";
+                    shaft.transform.SetParent(root.transform, false);
+                    shaft.transform.localScale = new Vector3(0.06f, 0.5f, 0.06f);
+                    Object.Destroy(shaft.GetComponent<Collider>());
+                    shaft.GetComponent<Renderer>().material = CreateMaterial(handleColor);
+
+                    var blade = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    blade.name = "Blade";
+                    blade.transform.SetParent(root.transform, false);
+                    blade.transform.localScale = new Vector3(0.4f, 0.06f, 0.15f);
+                    blade.transform.localPosition = new Vector3(0.15f, 0.5f, 0f);
+                    blade.transform.localRotation = Quaternion.Euler(0f, 0f, 30f);
+                    Object.Destroy(blade.GetComponent<Collider>());
+                    blade.GetComponent<Renderer>().material = CreateMaterial(bladeColor);
+                    break;
+                }
+                case WeaponType.HoeBlade:
+                {
+                    var shaft = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    shaft.name = "Shaft";
+                    shaft.transform.SetParent(root.transform, false);
+                    shaft.transform.localScale = new Vector3(0.06f, 0.5f, 0.06f);
+                    Object.Destroy(shaft.GetComponent<Collider>());
+                    shaft.GetComponent<Renderer>().material = CreateMaterial(handleColor);
+
+                    var blade = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    blade.name = "Blade";
+                    blade.transform.SetParent(root.transform, false);
+                    blade.transform.localScale = new Vector3(0.35f, 0.08f, 0.2f);
+                    blade.transform.localPosition = new Vector3(0f, 0.5f, 0f);
+                    Object.Destroy(blade.GetComponent<Collider>());
+                    blade.GetComponent<Renderer>().material = CreateMaterial(bladeColor);
+                    break;
+                }
+                case WeaponType.SickleShield:
+                {
+                    var blade = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    blade.name = "Blade";
+                    blade.transform.SetParent(root.transform, false);
+                    blade.transform.localScale = new Vector3(0.25f, 0.05f, 0.1f);
+                    Object.Destroy(blade.GetComponent<Collider>());
+                    blade.GetComponent<Renderer>().material = CreateMaterial(bladeColor);
+
+                    var shield = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    shield.name = "Shield";
+                    shield.transform.SetParent(root.transform, false);
+                    shield.transform.localScale = new Vector3(0.3f, 0.02f, 0.3f);
+                    shield.transform.localPosition = new Vector3(-0.2f, 0f, 0f);
+                    Object.Destroy(shield.GetComponent<Collider>());
+                    shield.GetComponent<Renderer>().material = CreateMaterial(handleColor);
+                    break;
+                }
+                case WeaponType.PitchforkSpear:
+                {
+                    var shaft = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    shaft.name = "Shaft";
+                    shaft.transform.SetParent(root.transform, false);
+                    shaft.transform.localScale = new Vector3(0.05f, 0.6f, 0.05f);
+                    Object.Destroy(shaft.GetComponent<Collider>());
+                    shaft.GetComponent<Renderer>().material = CreateMaterial(handleColor);
+
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var prong = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                        prong.name = $"Prong_{i}";
+                        prong.transform.SetParent(root.transform, false);
+                        prong.transform.localScale = new Vector3(0.03f, 0.12f, 0.03f);
+                        prong.transform.localPosition = new Vector3((i - 1) * 0.05f, 0.66f, 0f);
+                        Object.Destroy(prong.GetComponent<Collider>());
+                        prong.GetComponent<Renderer>().material = CreateMaterial(bladeColor);
+                    }
+                    break;
+                }
+                case WeaponType.SeedSling:
+                {
+                    var arm = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    arm.name = "Arm";
+                    arm.transform.SetParent(root.transform, false);
+                    arm.transform.localScale = new Vector3(0.04f, 0.35f, 0.04f);
+                    Object.Destroy(arm.GetComponent<Collider>());
+                    arm.GetComponent<Renderer>().material = CreateMaterial(handleColor);
+
+                    var pouch = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    pouch.name = "Pouch";
+                    pouch.transform.SetParent(root.transform, false);
+                    pouch.transform.localScale = new Vector3(0.12f, 0.12f, 0.12f);
+                    pouch.transform.localPosition = new Vector3(0f, 0.35f, 0f);
+                    Object.Destroy(pouch.GetComponent<Collider>());
+                    pouch.GetComponent<Renderer>().material = CreateMaterial(bladeColor);
+                    break;
+                }
+                case WeaponType.DruidStaff:
+                {
+                    var staff = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    staff.name = "Staff";
+                    staff.transform.SetParent(root.transform, false);
+                    staff.transform.localScale = new Vector3(0.05f, 0.7f, 0.05f);
+                    Object.Destroy(staff.GetComponent<Collider>());
+                    staff.GetComponent<Renderer>().material = CreateMaterial(handleColor);
+
+                    var orb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    orb.name = "Orb";
+                    orb.transform.SetParent(root.transform, false);
+                    orb.transform.localScale = new Vector3(0.15f, 0.15f, 0.15f);
+                    orb.transform.localPosition = new Vector3(0f, 0.7f, 0f);
+                    Object.Destroy(orb.GetComponent<Collider>());
+                    orb.GetComponent<Renderer>().material = CreateMaterial(bladeColor);
+                    break;
+                }
+            }
+
+            return root;
+        }
+
+        private GameObject CreateArmorVisual(EquipmentSlot slot)
+        {
+            var playerModel = _player.transform.Find("PlayerModel");
+            if (playerModel == null) return null;
+
+            GameObject piece;
+            Vector3 localPos;
+            Vector3 localScale;
+            Color color;
+
+            switch (slot)
+            {
+                case EquipmentSlot.Head:
+                    piece = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    piece.name = "Armor_Head";
+                    localPos = new Vector3(0f, 0.65f, 0f);
+                    localScale = new Vector3(0.55f, 0.35f, 0.55f);
+                    color = new Color(0.5f, 0.55f, 0.65f);
+                    break;
+                case EquipmentSlot.Chest:
+                    piece = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    piece.name = "Armor_Chest";
+                    localPos = new Vector3(0f, 0.1f, 0f);
+                    localScale = new Vector3(0.7f, 0.5f, 0.4f);
+                    color = new Color(0.45f, 0.4f, 0.35f);
+                    break;
+                case EquipmentSlot.Legs:
+                    piece = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    piece.name = "Armor_Legs";
+                    localPos = new Vector3(0f, -0.35f, 0f);
+                    localScale = new Vector3(0.55f, 0.35f, 0.35f);
+                    color = new Color(0.4f, 0.35f, 0.3f);
+                    break;
+                case EquipmentSlot.Accessory:
+                    piece = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                    piece.name = "Armor_Accessory";
+                    localPos = new Vector3(0.4f, 0.3f, 0f);
+                    localScale = new Vector3(0.12f, 0.12f, 0.12f);
+                    color = new Color(0.3f, 0.9f, 1.0f);
+                    break;
+                default:
+                    return null;
+            }
+
+            Object.Destroy(piece.GetComponent<Collider>());
+            piece.transform.SetParent(playerModel, false);
+            piece.transform.localPosition = localPos;
+            piece.transform.localScale = localScale;
+            piece.GetComponent<Renderer>().material = CreateMaterial(color);
+            return piece;
         }
 
         private static Color ElementToColor(Element e) => e switch
