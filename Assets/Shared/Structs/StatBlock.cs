@@ -11,6 +11,8 @@ namespace SoR.Shared
         public float Verdance;
         public float Agility;
         public float Resilience;
+        public float Fortitude;
+        public float Wisdom;
 
         public float GetStat(StatType type) => type switch
         {
@@ -20,6 +22,8 @@ namespace SoR.Shared
             StatType.Verdance => Verdance,
             StatType.Agility => Agility,
             StatType.Resilience => Resilience,
+            StatType.Fortitude => Fortitude,
+            StatType.Wisdom => Wisdom,
             _ => throw new ArgumentOutOfRangeException(nameof(type), type, null)
         };
 
@@ -33,6 +37,8 @@ namespace SoR.Shared
                 case StatType.Verdance:   Verdance = value;   break;
                 case StatType.Agility:    Agility = value;    break;
                 case StatType.Resilience: Resilience = value; break;
+                case StatType.Fortitude:  Fortitude = value;  break;
+                case StatType.Wisdom:     Wisdom = value;     break;
                 default: throw new ArgumentOutOfRangeException(nameof(type), type, null);
             }
         }
@@ -46,7 +52,9 @@ namespace SoR.Shared
                 Harvest = a.Harvest + b.Harvest,
                 Verdance = a.Verdance + b.Verdance,
                 Agility = a.Agility + b.Agility,
-                Resilience = a.Resilience + b.Resilience
+                Resilience = a.Resilience + b.Resilience,
+                Fortitude = a.Fortitude + b.Fortitude,
+                Wisdom = a.Wisdom + b.Wisdom
             };
         }
     }

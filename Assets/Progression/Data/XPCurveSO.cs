@@ -5,8 +5,8 @@ namespace SoR.Progression
     [CreateAssetMenu(menuName = "SoR/Progression/XPCurve")]
     public class XPCurveSO : ScriptableObject
     {
-        [SerializeField] private AnimationCurve _xpCurve = AnimationCurve.EaseInOut(1f, 100f, 40f, 100000f);
-        [SerializeField] private int _maxLevel = 40;
+        [SerializeField] private AnimationCurve _xpCurve = AnimationCurve.EaseInOut(1f, 100f, 45f, 100000f);
+        [SerializeField] private int _maxLevel = 45;
 
         public AnimationCurve XPCurve => _xpCurve;
         public int MaxLevel => _maxLevel;

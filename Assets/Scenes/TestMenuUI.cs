@@ -93,6 +93,159 @@ namespace SoR.Testing
         private readonly Dictionary<string, int> _companionLevels = new(); // companionId → level (1-45)
         private int _playerLevel = 1;
 
+        // ---- progression system ----
+        private int _playerXP = 0;
+        private int _statPoints = 0;
+        private StatBlock _allocatedStats;
+        private string _playerClassName = "Wanderer";
+        private string _playerEvolutionId;
+        private readonly List<string> _unlockedEvolutions = new();
+
+        // ---- XP table (cumulative XP needed per level, index = level) ----
+        private static readonly int[] _xpTable = new int[46]
+        {
+            0,          // 0 (unused)
+            0,          // 1
+            500,        // 2
+            1100,       // 3
+            1800,       // 4
+            2600,       // 5
+            4000,       // 6
+            5600,       // 7
+            7400,       // 8
+            9500,       // 9
+            12000,      // 10
+            15500,      // 11
+            19500,      // 12
+            24000,      // 13
+            29000,      // 14
+            34500,      // 15
+            40500,      // 16
+            47500,      // 17
+            55000,      // 18
+            63000,      // 19
+            72000,      // 20
+            83000,      // 21
+            95000,      // 22
+            108000,     // 23
+            122000,     // 24
+            138000,     // 25
+            155000,     // 26
+            174000,     // 27
+            195000,     // 28
+            218000,     // 29
+            244000,     // 30
+            272000,     // 31
+            303000,     // 32
+            337000,     // 33
+            374000,     // 34
+            415000,     // 35
+            460000,     // 36
+            510000,     // 37
+            565000,     // 38
+            625000,     // 39
+            690000,     // 40
+            740000,     // 41
+            790000,     // 42
+            820000,     // 43
+            845000,     // 44
+            860000      // 45
+        };
+
+        // ---- class evolution data ----
+        private struct EvolutionChoice
+        {
+            public string Id;
+            public string Name;
+            public int RequiredLevel;
+            public int Tier;
+            public string ParentId;   // null for tier 1
+            public StatType RequiredStat1;
+            public float RequiredValue1;
+            public StatType RequiredStat2;
+            public float RequiredValue2;
+            public StatBlock BonusStats;
+        }
+
+        private static readonly EvolutionChoice[] _evolutionChoices = new[]
+        {
+            // Tier 1 (Level 10)
+            new EvolutionChoice
+            {
+                Id = "reaper", Name = "Reaper", RequiredLevel = 10, Tier = 1, ParentId = null,
+                RequiredStat1 = StatType.Strength, RequiredValue1 = 5f,
+                RequiredStat2 = StatType.Strength, RequiredValue2 = 0f,
+                BonusStats = new StatBlock { Strength = 3f, Vigor = 2f }
+            },
+            new EvolutionChoice
+            {
+                Id = "cultivator", Name = "Cultivator", RequiredLevel = 10, Tier = 1, ParentId = null,
+                RequiredStat1 = StatType.Verdance, RequiredValue1 = 5f,
+                RequiredStat2 = StatType.Verdance, RequiredValue2 = 0f,
+                BonusStats = new StatBlock { Verdance = 3f, Wisdom = 2f }
+            },
+            // Tier 2 (Level 20) — Reaper branch
+            new EvolutionChoice
+            {
+                Id = "thresher", Name = "Thresher", RequiredLevel = 20, Tier = 2, ParentId = "reaper",
+                RequiredStat1 = StatType.Strength, RequiredValue1 = 12f,
+                RequiredStat2 = StatType.Vigor, RequiredValue2 = 12f,
+                BonusStats = new StatBlock { Strength = 5f, Vigor = 3f, Agility = 2f }
+            },
+            new EvolutionChoice
+            {
+                Id = "grove_warden", Name = "Grove Warden", RequiredLevel = 20, Tier = 2, ParentId = "reaper",
+                RequiredStat1 = StatType.Vigor, RequiredValue1 = 12f,
+                RequiredStat2 = StatType.Fortitude, RequiredValue2 = 8f,
+                BonusStats = new StatBlock { Vigor = 5f, Fortitude = 4f, Resilience = 2f }
+            },
+            // Tier 2 (Level 20) — Cultivator branch
+            new EvolutionChoice
+            {
+                Id = "harvest_mage", Name = "Harvest Mage", RequiredLevel = 20, Tier = 2, ParentId = "cultivator",
+                RequiredStat1 = StatType.Verdance, RequiredValue1 = 12f,
+                RequiredStat2 = StatType.Wisdom, RequiredValue2 = 8f,
+                BonusStats = new StatBlock { Verdance = 5f, Wisdom = 3f, Harvest = 2f }
+            },
+            new EvolutionChoice
+            {
+                Id = "life_weaver", Name = "Life Weaver", RequiredLevel = 20, Tier = 2, ParentId = "cultivator",
+                RequiredStat1 = StatType.Wisdom, RequiredValue1 = 12f,
+                RequiredStat2 = StatType.Verdance, RequiredValue2 = 8f,
+                BonusStats = new StatBlock { Wisdom = 5f, Verdance = 3f, Resilience = 2f }
+            },
+            // Tier 3 (Level 35) — Thresher/Grove Warden branch
+            new EvolutionChoice
+            {
+                Id = "archon_scythe", Name = "Archon of the Scythe", RequiredLevel = 35, Tier = 3, ParentId = "thresher",
+                RequiredStat1 = StatType.Strength, RequiredValue1 = 25f,
+                RequiredStat2 = StatType.Vigor, RequiredValue2 = 25f,
+                BonusStats = new StatBlock { Strength = 8f, Vigor = 5f, Agility = 3f, Harvest = 2f }
+            },
+            new EvolutionChoice
+            {
+                Id = "iron_root", Name = "Iron Root", RequiredLevel = 35, Tier = 3, ParentId = "grove_warden",
+                RequiredStat1 = StatType.Vigor, RequiredValue1 = 25f,
+                RequiredStat2 = StatType.Fortitude, RequiredValue2 = 20f,
+                BonusStats = new StatBlock { Vigor = 8f, Fortitude = 6f, Resilience = 4f }
+            },
+            // Tier 3 (Level 35) — Harvest Mage/Life Weaver branch
+            new EvolutionChoice
+            {
+                Id = "verdant_sage", Name = "Verdant Sage", RequiredLevel = 35, Tier = 3, ParentId = "harvest_mage",
+                RequiredStat1 = StatType.Verdance, RequiredValue1 = 25f,
+                RequiredStat2 = StatType.Wisdom, RequiredValue2 = 20f,
+                BonusStats = new StatBlock { Verdance = 8f, Wisdom = 6f, Harvest = 4f }
+            },
+            new EvolutionChoice
+            {
+                Id = "blight_walker", Name = "Blight Walker", RequiredLevel = 35, Tier = 3, ParentId = "life_weaver",
+                RequiredStat1 = StatType.Wisdom, RequiredValue1 = 25f,
+                RequiredStat2 = StatType.Verdance, RequiredValue2 = 20f,
+                BonusStats = new StatBlock { Wisdom = 8f, Resilience = 5f, Verdance = 3f, Fortitude = 2f }
+            },
+        };
+
         // ---- guild system ----
         private int _guildReputation = 0;
         private int _guildContractsCompleted = 0;
@@ -161,6 +314,7 @@ namespace SoR.Testing
             _screenKeys[KeyCode.Q] = ShowQuestLog;
             _screenKeys[KeyCode.K] = ShowSkills;
             _screenKeys[KeyCode.T] = ShowTitles;
+            _screenKeys[KeyCode.L] = ShowCharacterStats;
             // E is handled specially in Update() (NPC shop vs Equipment)
             _screenKeys[KeyCode.BackQuote] = ShowCheatMenu;
 
@@ -171,6 +325,9 @@ namespace SoR.Testing
             // Quest objective tracker — bridges game events to QuestManager.UpdateObjective()
             var trackerGo = new GameObject("QuestObjectiveTracker");
             trackerGo.AddComponent<SoR.Systems.Quests.QuestObjectiveTracker>();
+
+            // Subscribe to enemy kills for XP gain
+            EventBus.Subscribe<EnemyKilledEvent>(OnEnemyKilled);
         }
 
         private void RevealFogAroundPlayer()
@@ -1697,7 +1854,7 @@ namespace SoR.Testing
             var textGo = new GameObject("HintText");
             textGo.transform.SetParent(_hintBar.transform, false);
             var text = textGo.AddComponent<Text>();
-            text.text = "[I] Inventory  [E] NPC/Equipment  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [T] Titles  [`] Cheats  [ESC] Close";
+            text.text = "[I] Inventory  [E] NPC/Equipment  [C] Crafting  [G] Gacha  [P] Companions  [M] Map  [Q] Quests  [K] Skills  [T] Titles  [L] Character  [`] Cheats  [ESC] Close";
             text.font = _font;
             text.fontSize = 16;
             text.color = Color.white;
@@ -1867,6 +2024,7 @@ namespace SoR.Testing
             AddRowLabel(content, "  --- Stat Bonuses ---", row, new Color(0.95f, 0.85f, 0.5f)); row++;
             AddRowLabel(content, $"  VIG {stats.Vigor:+0;-0;0}  STR {stats.Strength:+0;-0;0}  HAR {stats.Harvest:+0;-0;0}", row, Color.white); row++;
             AddRowLabel(content, $"  VER {stats.Verdance:+0;-0;0}  AGI {stats.Agility:+0;-0;0}  RES {stats.Resilience:+0;-0;0}", row, Color.white); row++;
+            AddRowLabel(content, $"  FOR {stats.Fortitude:+0;-0;0}  WIS {stats.Wisdom:+0;-0;0}", row, Color.white); row++;
 
             AddRowLabel(content, "", row, Color.white); row++;
 
@@ -2646,6 +2804,7 @@ namespace SoR.Testing
                 var nextStats = TestSceneSetup.GetCompanionStatBlock(companionId, nextLevel);
                 AddRowLabel(content, $"  VIG {curStats.Vigor:F0} -> {nextStats.Vigor:F0}  STR {curStats.Strength:F0} -> {nextStats.Strength:F0}  HAR {curStats.Harvest:F0} -> {nextStats.Harvest:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
                 AddRowLabel(content, $"  VER {curStats.Verdance:F0} -> {nextStats.Verdance:F0}  AGI {curStats.Agility:F0} -> {nextStats.Agility:F0}  RES {curStats.Resilience:F0} -> {nextStats.Resilience:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+                AddRowLabel(content, $"  FOR {curStats.Fortitude:F0} -> {nextStats.Fortitude:F0}  WIS {curStats.Wisdom:F0} -> {nextStats.Wisdom:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
 
                 AddRowLabel(content, "", row, Color.white); row++;
 
@@ -2774,6 +2933,7 @@ namespace SoR.Testing
 
                 var stats = TestSceneSetup.GetCompanionStatBlock(companionId, 45);
                 AddRowLabel(content, $"  VIG {stats.Vigor:F0}  STR {stats.Strength:F0}  HAR {stats.Harvest:F0}  VER {stats.Verdance:F0}  AGI {stats.Agility:F0}  RES {stats.Resilience:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
+                AddRowLabel(content, $"  FOR {stats.Fortitude:F0}  WIS {stats.Wisdom:F0}", row, new Color(0.8f, 0.8f, 0.8f)); row++;
             }
 
             AddRowLabel(content, "", row, Color.white); row++;
@@ -3936,6 +4096,8 @@ namespace SoR.Testing
             if (stats.Verdance != 0) parts.Add($"VER +{stats.Verdance:F0}");
             if (stats.Agility != 0) parts.Add($"AGI +{stats.Agility:F0}");
             if (stats.Resilience != 0) parts.Add($"RES +{stats.Resilience:F0}");
+            if (stats.Fortitude != 0) parts.Add($"FOR +{stats.Fortitude:F0}");
+            if (stats.Wisdom != 0) parts.Add($"WIS +{stats.Wisdom:F0}");
             return parts.Count > 0 ? string.Join(", ", parts) : "None";
         }
 
@@ -4269,15 +4431,68 @@ namespace SoR.Testing
 
             AddRowLabel(content, "", row, Color.white); row++;
 
-            // ---- COMPANION LEVELS ----
-            AddRowLabel(content, "  --- Companion Levels ---", row, headerColor); row++;
+            // ---- PROGRESSION ----
+            AddRowLabel(content, "  --- Progression ---", row, headerColor); row++;
 
-            AddRowLabel(content, $"  Player Level: {_playerLevel}", row, cheatColor);
+            AddRowLabel(content, $"  Player Level: {_playerLevel}  XP: {_playerXP}  Stat Pts: {_statPoints}", row, cheatColor);
             AddCheatValueButtons(content, row, new[] { 1f, 15f, 30f, 45f }, v =>
             {
-                _playerLevel = (int)v;
+                int targetLevel = (int)v;
+                _playerLevel = targetLevel;
+                _playerXP = targetLevel >= 1 && targetLevel <= 45 ? _xpTable[targetLevel] : 0;
+                _statPoints = (targetLevel - 1) * 3; // 3 per level minus what's allocated
+                float totalAllocated = 0f;
+                foreach (StatType st in System.Enum.GetValues(typeof(StatType)))
+                    totalAllocated += _allocatedStats.GetStat(st);
+                _statPoints -= (int)totalAllocated;
+                if (_statPoints < 0) _statPoints = 0;
+                ApplyStatScaling();
                 CloseActiveScreen(); ShowCheatMenu();
             }); row++;
+
+            AddRowLabel(content, "  Stat Points presets", row, cheatColor);
+            AddCheatValueButtons(content, row, new[] { 10f, 50f, 100f, 132f }, v =>
+            {
+                _statPoints = (int)v;
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Reset allocated stats (refund all points)", row, cheatColor);
+            AddButton(content, "Reset", row, () =>
+            {
+                float totalAllocated = 0f;
+                foreach (StatType st in System.Enum.GetValues(typeof(StatType)))
+                    totalAllocated += _allocatedStats.GetStat(st);
+                _statPoints += (int)totalAllocated;
+                _allocatedStats = new StatBlock();
+                ApplyStatScaling();
+                Debug.Log("[Cheat] All stat points refunded");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Reset class evolution", row, cheatColor);
+            AddButton(content, "Reset", row, () =>
+            {
+                _unlockedEvolutions.Clear();
+                _playerClassName = "Wanderer";
+                _playerEvolutionId = null;
+                ApplyStatScaling();
+                Debug.Log("[Cheat] Class evolution reset");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Add +10000 XP", row, cheatColor);
+            AddButton(content, "+10K XP", row, () =>
+            {
+                AddPlayerXP(10000);
+                Debug.Log($"[Cheat] +10000 XP (now {_playerXP}, level {_playerLevel})");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- COMPANION LEVELS ----
+            AddRowLabel(content, "  --- Companion Levels ---", row, headerColor); row++;
 
             AddRowLabel(content, "  Level all companions to max (45)", row, cheatColor);
             AddButton(content, "Max All", row, () =>
@@ -5126,6 +5341,300 @@ namespace SoR.Testing
                 if (companionId == _partySupportId)
                     _sceneSetup.SetPartyCompanion("Support", companionId, targetLevel);
             }
+        }
+
+        // ================================================================
+        // PROGRESSION SYSTEM — XP, Stats, Class Evolution
+        // ================================================================
+
+        private void OnEnemyKilled(EnemyKilledEvent evt)
+        {
+            if (_sceneSetup == null) return;
+            int baseXP = _sceneSetup.GetEnemyXP(evt.EnemyDefinitionId);
+            // Wisdom bonus: +1% XP per point
+            float totalStats = GetTotalStat(StatType.Wisdom);
+            float wisdomBonus = 1f + totalStats * 0.01f;
+            int finalXP = Mathf.RoundToInt(baseXP * wisdomBonus);
+            AddPlayerXP(finalXP);
+        }
+
+        private float GetTotalStat(StatType type)
+        {
+            float baseVal = _sceneSetup != null && _sceneSetup.PlayerStats != null
+                ? _sceneSetup.PlayerStats.BaseStats.GetStat(type) : 0f;
+            return baseVal + _allocatedStats.GetStat(type) + GetEvolutionBonusStat(type);
+        }
+
+        private float GetEvolutionBonusStat(StatType type)
+        {
+            float bonus = 0f;
+            foreach (var evoId in _unlockedEvolutions)
+            {
+                foreach (var choice in _evolutionChoices)
+                {
+                    if (choice.Id == evoId)
+                    {
+                        bonus += choice.BonusStats.GetStat(type);
+                        break;
+                    }
+                }
+            }
+            return bonus;
+        }
+
+        private void AddPlayerXP(int amount)
+        {
+            if (_playerLevel >= 45) return;
+            _playerXP += amount;
+
+            // Check for level-ups
+            while (_playerLevel < 45 && _playerXP >= _xpTable[_playerLevel + 1])
+            {
+                _playerLevel++;
+                _statPoints += 3;
+                Debug.Log($"[Progression] Level up! Now level {_playerLevel} (+3 stat points, total: {_statPoints})");
+            }
+
+            ApplyStatScaling();
+        }
+
+        private void ApplyStatScaling()
+        {
+            if (_sceneSetup == null) return;
+            float vigor = GetTotalStat(StatType.Vigor);
+            float verdance = GetTotalStat(StatType.Verdance);
+            _sceneSetup.PlayerMaxHealth = 1000f + vigor * 12f;
+            _sceneSetup.PlayerMaxVerdance = 100f + verdance * 8f;
+        }
+
+        private void AllocateStatPoint(StatType type)
+        {
+            if (_statPoints <= 0) return;
+            _statPoints--;
+            _allocatedStats.SetStat(type, _allocatedStats.GetStat(type) + 1f);
+            ApplyStatScaling();
+        }
+
+        private void DeallocateStatPoint(StatType type)
+        {
+            float current = _allocatedStats.GetStat(type);
+            if (current <= 0f) return;
+            _statPoints++;
+            _allocatedStats.SetStat(type, current - 1f);
+            ApplyStatScaling();
+        }
+
+        private List<EvolutionChoice> GetAvailableEvolutions()
+        {
+            var available = new List<EvolutionChoice>();
+            // Determine which tiers are already chosen
+            var chosenTiers = new HashSet<int>();
+            foreach (var evoId in _unlockedEvolutions)
+            {
+                foreach (var c in _evolutionChoices)
+                {
+                    if (c.Id == evoId) { chosenTiers.Add(c.Tier); break; }
+                }
+            }
+
+            foreach (var choice in _evolutionChoices)
+            {
+                if (_playerLevel < choice.RequiredLevel) continue;
+                if (chosenTiers.Contains(choice.Tier)) continue;
+                // Check parent requirement
+                if (choice.ParentId != null && !_unlockedEvolutions.Contains(choice.ParentId)) continue;
+                // Check stat requirements
+                if (GetTotalStat(choice.RequiredStat1) < choice.RequiredValue1) continue;
+                if (choice.RequiredValue2 > 0f && GetTotalStat(choice.RequiredStat2) < choice.RequiredValue2) continue;
+                available.Add(choice);
+            }
+            return available;
+        }
+
+        private void SelectEvolution(EvolutionChoice choice)
+        {
+            _unlockedEvolutions.Add(choice.Id);
+            _playerClassName = choice.Name;
+            _playerEvolutionId = choice.Id;
+            ApplyStatScaling();
+            Debug.Log($"[Progression] Evolved to {choice.Name}!");
+        }
+
+        // ================================================================
+        // CHARACTER STATS SCREEN (L key)
+        // ================================================================
+
+        private void ShowCharacterStats()
+        {
+            var panel = CreateScreenPanel("Character Stats");
+            var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
+
+            int row = 0;
+            Color headerColor = new Color(0.4f, 0.8f, 1f);
+            Color statColor = new Color(0.9f, 0.9f, 0.9f);
+            Color valueColor = new Color(0.6f, 1f, 0.6f);
+
+            // ---- SECTION 1: Progression ----
+            AddRowLabel(content, "  --- Progression ---", row, headerColor); row++;
+            AddRowLabel(content, $"  Class: {_playerClassName}", row, new Color(1f, 0.85f, 0.3f)); row++;
+            AddRowLabel(content, $"  Level: {_playerLevel} / 45", row, statColor); row++;
+
+            // XP bar
+            int currentXP = _playerXP;
+            int xpForCurrent = _playerLevel >= 1 ? _xpTable[_playerLevel] : 0;
+            int xpForNext = _playerLevel < 45 ? _xpTable[_playerLevel + 1] : _xpTable[45];
+            int xpInLevel = currentXP - xpForCurrent;
+            int xpNeeded = xpForNext - xpForCurrent;
+            float xpPct = xpNeeded > 0 ? Mathf.Clamp01((float)xpInLevel / xpNeeded) : 1f;
+            int barFilled = Mathf.RoundToInt(xpPct * 20);
+            string xpBar = new string('#', barFilled) + new string('-', 20 - barFilled);
+            string xpLabel = _playerLevel >= 45 ? "MAX" : $"{xpInLevel} / {xpNeeded}";
+            AddRowLabel(content, $"  XP: [{xpBar}] {xpLabel}", row, statColor); row++;
+            AddRowLabel(content, $"  Total XP: {currentXP}", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+            AddRowLabel(content, $"  Stat Points: {_statPoints}", row, _statPoints > 0 ? valueColor : statColor); row++;
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- SECTION 2: Stats with +/- buttons ----
+            AddRowLabel(content, "  --- Stats ---", row, headerColor); row++;
+            AddRowLabel(content, $"  {'Abbr',-5} {'Stat',-12} {'Value',6}  {'Allocated',9}  Effect", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+
+            var statInfo = new[]
+            {
+                (StatType.Vigor, "VIG", "Vigor", "+12 HP, +0.5% DEF per pt"),
+                (StatType.Strength, "STR", "Strength", "+2% melee DMG, +1 stagger per pt"),
+                (StatType.Harvest, "HAR", "Harvest", "+0.8% crit, +1% loot per pt"),
+                (StatType.Verdance, "VER", "Verdance", "+8 VP, +1.5% skill DMG per pt"),
+                (StatType.Agility, "AGI", "Agility", "+1% dodge, +0.5% speed per pt"),
+                (StatType.Resilience, "RES", "Resilience", "+1% resist, +0.3% DEF per pt"),
+                (StatType.Fortitude, "FOR", "Fortitude", "+5 stamina, +1% resist per pt"),
+                (StatType.Wisdom, "WIS", "Wisdom", "+1% XP, -0.5% CDR per pt"),
+            };
+
+            foreach (var (type, abbr, name, effect) in statInfo)
+            {
+                float total = GetTotalStat(type);
+                float allocated = _allocatedStats.GetStat(type);
+                AddRowLabel(content, $"  {abbr,-5} {name,-12} {total,6:F0}  ({allocated:F0} pts)   {effect}", row, statColor);
+
+                // [+] button (right-aligned via standard AddButton)
+                if (_statPoints > 0)
+                {
+                    var capturedType = type;
+                    AddButton(content, "+", row, () =>
+                    {
+                        AllocateStatPoint(capturedType);
+                        CloseActiveScreen(); ShowCharacterStats();
+                    });
+                }
+                row++;
+
+                // [-] button on next row if has allocated points
+                if (allocated > 0f)
+                {
+                    var capturedType = type;
+                    AddRowLabel(content, $"         Deallocate 1 pt from {name}", row, new Color(0.7f, 0.6f, 0.6f));
+                    AddButton(content, "-", row, () =>
+                    {
+                        DeallocateStatPoint(capturedType);
+                        CloseActiveScreen(); ShowCharacterStats();
+                    });
+                    row++;
+                }
+            }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- SECTION 3: Derived Stats ----
+            AddRowLabel(content, "  --- Derived Stats ---", row, headerColor); row++;
+
+            float vigor = GetTotalStat(StatType.Vigor);
+            float strength = GetTotalStat(StatType.Strength);
+            float harvest = GetTotalStat(StatType.Harvest);
+            float verdance = GetTotalStat(StatType.Verdance);
+            float agility = GetTotalStat(StatType.Agility);
+            float resilience = GetTotalStat(StatType.Resilience);
+            float fortitude = GetTotalStat(StatType.Fortitude);
+            float wisdom = GetTotalStat(StatType.Wisdom);
+
+            AddRowLabel(content, $"  Max HP:       {1000f + vigor * 12f:F0}", row, statColor); row++;
+            AddRowLabel(content, $"  DEF%:         {vigor * 0.5f + resilience * 0.3f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  Melee DMG%:   {strength * 2f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  Max VP:       {100f + verdance * 8f:F0}", row, statColor); row++;
+            AddRowLabel(content, $"  Skill DMG%:   {verdance * 1.5f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  Stamina:      {100f + fortitude * 5f:F0}", row, statColor); row++;
+            AddRowLabel(content, $"  Resist%:      {resilience * 1f + fortitude * 1f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  Crit%:        {harvest * 0.8f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  Loot%:        {harvest * 1f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  XP Bonus%:    {wisdom * 1f:F1}%", row, statColor); row++;
+            AddRowLabel(content, $"  CDR%:         {wisdom * 0.5f:F1}%", row, statColor); row++;
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // ---- SECTION 4: Class Evolution ----
+            AddRowLabel(content, "  --- Class Evolution ---", row, headerColor); row++;
+
+            // Show current evolution path
+            if (_unlockedEvolutions.Count > 0)
+            {
+                string path = string.Join(" -> ", _unlockedEvolutions.ConvertAll(id =>
+                {
+                    foreach (var c in _evolutionChoices)
+                        if (c.Id == id) return c.Name;
+                    return id;
+                }));
+                AddRowLabel(content, $"  Path: Wanderer -> {path}", row, new Color(1f, 0.85f, 0.3f)); row++;
+            }
+            else
+            {
+                AddRowLabel(content, "  Path: Wanderer (no evolutions yet)", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+            }
+
+            AddRowLabel(content, "", row, Color.white); row++;
+
+            // Show available evolutions
+            var available = GetAvailableEvolutions();
+            if (available.Count > 0)
+            {
+                AddRowLabel(content, "  Available Evolutions:", row, new Color(0.4f, 1f, 0.4f)); row++;
+                foreach (var evo in available)
+                {
+                    AddRowLabel(content, $"  [{evo.Name}] (Tier {evo.Tier}, Lv {evo.RequiredLevel})", row, new Color(1f, 0.9f, 0.5f));
+                    string bonuses = FormatStatBonuses(evo.BonusStats);
+                    row++;
+                    AddRowLabel(content, $"    Bonuses: {bonuses}", row, new Color(0.7f, 0.9f, 0.7f)); row++;
+
+                    var capturedEvo = evo;
+                    AddButton(content, "Evolve", row, () =>
+                    {
+                        SelectEvolution(capturedEvo);
+                        CloseActiveScreen(); ShowCharacterStats();
+                    });
+                    row++;
+                    AddRowLabel(content, "", row, Color.white); row++;
+                }
+            }
+            else
+            {
+                // Determine why no evolutions
+                var chosenTiers = new HashSet<int>();
+                foreach (var evoId in _unlockedEvolutions)
+                    foreach (var c in _evolutionChoices)
+                        if (c.Id == evoId) { chosenTiers.Add(c.Tier); break; }
+
+                if (chosenTiers.Contains(3))
+                    AddRowLabel(content, "  All evolutions complete!", row, new Color(0.4f, 1f, 0.4f));
+                else if (_playerLevel < 10)
+                    AddRowLabel(content, "  Next evolution at Level 10", row, new Color(0.7f, 0.7f, 0.7f));
+                else if (_playerLevel < 20 && chosenTiers.Contains(1))
+                    AddRowLabel(content, "  Next evolution at Level 20", row, new Color(0.7f, 0.7f, 0.7f));
+                else if (_playerLevel < 35 && chosenTiers.Contains(2))
+                    AddRowLabel(content, "  Next evolution at Level 35", row, new Color(0.7f, 0.7f, 0.7f));
+                else
+                    AddRowLabel(content, "  No evolutions available (check stat requirements)", row, new Color(0.7f, 0.7f, 0.7f));
+                row++;
+            }
+
+            SetContentHeight(content, row);
         }
 
         // ================================================================

@@ -7,6 +7,8 @@ namespace SoR.Shared
         Harvest,
         Verdance,
         Agility,
-        Resilience
+        Resilience,
+        Fortitude,
+        Wisdom
     }
 }

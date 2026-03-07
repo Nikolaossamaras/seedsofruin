@@ -59,6 +59,13 @@ namespace SoR.Testing
 
         // ---- enemies ----
         private readonly List<EnemyEntry> _enemies = new();
+        private readonly Dictionary<string, int> _enemyXPLookup = new();
+
+        /// <summary>Returns the XP reward for the given enemy definition ID.</summary>
+        public int GetEnemyXP(string enemyDefId)
+        {
+            return _enemyXPLookup.TryGetValue(enemyDefId, out int xp) ? xp : 0;
+        }
 
         /// <summary>Kill all currently alive enemies.</summary>
         public void KillAllEnemies()
@@ -730,7 +737,9 @@ namespace SoR.Testing
                 Harvest = 8f,
                 Verdance = 12f,
                 Agility = 10f,
-                Resilience = 5f
+                Resilience = 5f,
+                Fortitude = 8f,
+                Wisdom = 5f
             };
 
             // PlayerController (Awake fires: creates StateMachine + states)
@@ -906,6 +915,7 @@ namespace SoR.Testing
             def.Tier = tier;
             def.XPReward = xpReward;
             def.GoldReward = goldReward;
+            _enemyXPLookup[def.EnemyId] = xpReward;
             def.BaseStats = new StatBlock
             {
                 Vigor = 3f + level * 0.5f,
@@ -914,6 +924,8 @@ namespace SoR.Testing
                 Verdance = element != Element.None ? 3f + level * 0.3f : 0f,
                 Agility = 3f + level * 0.4f,
                 Resilience = 2f + level * 0.3f,
+                Fortitude = 2f + level * 0.2f,
+                Wisdom = 1f + level * 0.1f
             };
 
             // AI controller
@@ -1661,7 +1673,9 @@ namespace SoR.Testing
                 Harvest = 5f * multiplier * levelScale,
                 Verdance = 8f * multiplier * levelScale,
                 Agility = 8f * multiplier * levelScale,
-                Resilience = 4f * multiplier * levelScale
+                Resilience = 4f * multiplier * levelScale,
+                Fortitude = 5f * multiplier * levelScale,
+                Wisdom = 3f * multiplier * levelScale
             };
         }
 
