@@ -116,6 +116,20 @@ namespace SoR.Testing
         private Transform _mapFogLayer;
         private int _mapRenderedFogCount;
 
+        // ---- dialogue system ----
+        private int _dialogueLineIndex;
+        private string _activeDialogueNpcId;
+        private Dictionary<string, DialogueData> _dialogueDatabase;
+
+        private struct DialogueChoice { public string Label; public int GoToLine; }
+        private struct DialogueNode
+        {
+            public string Speaker; public string Text;
+            public DialogueChoice[] Choices; // null = sequential
+            public bool IsEnd;               // true = show "Goodbye"
+        }
+        private struct DialogueData { public string NpcId; public DialogueNode[] Nodes; }
+
         private void Start()
         {
             _font = Resources.GetBuiltinResource<Font>("Arial.ttf");
@@ -134,6 +148,7 @@ namespace SoR.Testing
 
             RegisterSystems();
             SeedTestData();
+            InitDialogueDatabase();
             BuildCanvas();
             BuildHintBar();
 
@@ -302,6 +317,8 @@ namespace SoR.Testing
                     {
                         if (nearNpc.Value.ShopId == "adventure_guild")
                             ShowGuild();
+                        else if (nearNpc.Value.ShopId.StartsWith("story_"))
+                            ShowDialogue(nearNpc.Value.ShopId);
                         else
                             ShowShopForNPC(nearNpc.Value);
                         return;
@@ -1188,6 +1205,463 @@ namespace SoR.Testing
                     Debug.Log($"[Shop] Bought {itemId}");
                 }
             }
+        }
+
+        // ================================================================
+        // Dialogue System
+        // ================================================================
+
+        private void InitDialogueDatabase()
+        {
+            _dialogueDatabase = new Dictionary<string, DialogueData>();
+            InitMarenDialogue();
+            InitSilasDialogue();
+            InitLyraDialogue();
+            InitBramDialogue();
+            InitVarekDialogue();
+            InitHollowMotherDialogue();
+        }
+
+        private void InitMarenDialogue()
+        {
+            _dialogueDatabase["story_maren"] = new DialogueData
+            {
+                NpcId = "story_maren",
+                Nodes = new DialogueNode[]
+                {
+                    // 0 - greeting
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "You must be the new recruit. I'm Maren Ashveil, Guild Master of the Green Accord. We hold the line against the Wither — or we try to.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What is the Green Accord?", GoToLine = 1 },
+                            new DialogueChoice { Label = "Tell me about the Wither.", GoToLine = 4 },
+                            new DialogueChoice { Label = "Where should I go first?", GoToLine = 7 }
+                        }},
+                    // 1
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "The Accord was forged generations ago — a pact between druids, rangers, and common folk to keep the land alive. We tend the ley lines, guard the groves, and push back the rot." },
+                    // 2
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "But the Accord is fracturing. Some say our methods are too slow. Others have... taken matters into their own hands.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Who broke from the Accord?", GoToLine = 3 },
+                            new DialogueChoice { Label = "Ask something else.", GoToLine = 0 }
+                        }},
+                    // 3
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "Varek Ashwood. He was our finest Archdruid. He believed the only way to stop the Wither was to control it — bend it to his will. He vanished into the Withered Heart months ago. The corruption has only spread faster since.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I'll find him.", GoToLine = 10 },
+                            new DialogueChoice { Label = "Ask something else.", GoToLine = 0 }
+                        }},
+                    // 4
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "The Wither is a blight that devours life itself. It turns forests to ash, rivers to sludge, and people to hollow husks. It started in the east and has been creeping west for years." },
+                    // 5
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "We thought it was a natural cycle at first — the land breathing out before breathing in. But it never breathed in again.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What caused it?", GoToLine = 6 },
+                            new DialogueChoice { Label = "Ask something else.", GoToLine = 0 }
+                        }},
+                    // 6
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "No one knows for certain. Some blame Varek's rituals. Others whisper about something older — something that was always beneath the soil, waiting. I try not to think about that possibility.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Ask something else.", GoToLine = 0 },
+                            new DialogueChoice { Label = "I've heard enough.", GoToLine = 14 }
+                        }},
+                    // 7
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "Start with Greenreach Valley — you're standing in it. Talk to the merchants, get yourself outfitted. Silas Rootweaver wanders the outskirts and knows every herb in the region." },
+                    // 8
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "When you're ready for real danger, head to the Gloomtide Marshes south-east of here. Lyra Dawnfield is scouting there — she's found something troubling.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What about the other regions?", GoToLine = 9 },
+                            new DialogueChoice { Label = "Ask something else.", GoToLine = 0 }
+                        }},
+                    // 9
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "The Ashen Steppe to the south-west is harsh but survivable. Bram Ironplow holds a forge there. And the Withered Heart to the north-east... don't go there until you're ready. That's where Varek went.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Ask something else.", GoToLine = 0 },
+                            new DialogueChoice { Label = "I'll get moving.", GoToLine = 14 }
+                        }},
+                    // 10
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "Brave words. I hope you mean them. But don't rush in blind — the Heart has a way of twisting people. Prepare yourself first." },
+                    // 11
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "Speak to the others. Gather what knowledge you can. And if you find Varek... try to bring him back alive. Despite everything, I still believe there's good in him.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I'll do my best.", GoToLine = 12 },
+                            new DialogueChoice { Label = "No promises.", GoToLine = 13 }
+                        }},
+                    // 12
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "That's all any of us can do. The Accord stands with you, recruit. Now go — the land won't save itself.", IsEnd = true },
+                    // 13
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "Fair enough. Just remember — killing Varek won't stop the Wither. It might even make things worse. Think on that.", IsEnd = true },
+                    // 14
+                    new DialogueNode { Speaker = "Maren Ashveil", Text = "Stay sharp out there. The Accord's doors are always open to you.", IsEnd = true },
+                }
+            };
+        }
+
+        private void InitSilasDialogue()
+        {
+            _dialogueDatabase["story_silas"] = new DialogueData
+            {
+                NpcId = "story_silas",
+                Nodes = new DialogueNode[]
+                {
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "Ah, a visitor! Don't mind the smell — that's moonpetal extract. Perfectly safe. Mostly." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "I'm Silas. I travel the outskirts collecting herbs, roots, fungi — anything the soil still offers. The pickings grow thinner every season." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "The Wither, you see, doesn't just kill plants. It corrupts them. A wholesome herb becomes poison. A healing root becomes... something else entirely." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "I've seen witherbloom patches spreading where clover used to grow. Pretty little flowers, black as pitch, that scream when you pull them up. Not a metaphor — they actually scream." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "Some folk think the Wither is alive — that it thinks, plans, hungers. I think it's more like a fever. The land is sick, and the Wither is the symptom." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "The real question is what infected it. Something old stirred under the Withered Heart. Even the deeproot trees — the ones whose roots reach down to the ley lines — they've gone silent." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "My advice? Stock up on antitoxins before heading anywhere east. And if you see black flowers growing in a perfect circle — run. Don't look back. Don't even breathe." },
+                    new DialogueNode { Speaker = "Silas Rootweaver", Text = "Safe travels, friend. Come find me again if you need remedies. I'll be out here until the soil stops talking to me.", IsEnd = true },
+                }
+            };
+        }
+
+        private void InitLyraDialogue()
+        {
+            _dialogueDatabase["story_lyra"] = new DialogueData
+            {
+                NpcId = "story_lyra",
+                Nodes = new DialogueNode[]
+                {
+                    // 0
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Hold — you're not Withered. Good. I'm Lyra, ranger of the Green Accord. Or what's left of it out here in the marshes.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Maren sent me.", GoToLine = 1 },
+                            new DialogueChoice { Label = "What are you doing here?", GoToLine = 3 }
+                        }},
+                    // 1
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Maren? She's still holding the line back in Greenreach? Stubborn woman. Good. Someone has to." },
+                    // 2
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "She probably told you I found something troubling. That's putting it mildly.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What did you find?", GoToLine = 5 },
+                            new DialogueChoice { Label = "Why did you come alone?", GoToLine = 4 }
+                        }},
+                    // 3
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Scouting. Mapping the Wither's advance. Recording which paths are still safe — fewer every week. And I found something I wish I hadn't.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What did you find?", GoToLine = 5 },
+                            new DialogueChoice { Label = "Why do this alone?", GoToLine = 4 }
+                        }},
+                    // 4
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Because the Accord is stretched thin. Because most rangers won't venture past the tree line anymore. And because... I lost my unit to the Wither three months ago. I owe it to them to keep going.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I'm sorry.", GoToLine = 5 },
+                            new DialogueChoice { Label = "Tell me what you found.", GoToLine = 5 }
+                        }},
+                    // 5
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Ritual sites. Three of them, arranged in a triangle across the marshes. Stone circles with runes I've never seen — not druidic, not arcane. Something older." },
+                    // 6
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "The Wither is thickest around those sites. I think someone — or something — is using them to channel the corruption. If we could disrupt them, we might slow the spread.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I'll help you.", GoToLine = 7 },
+                            new DialogueChoice { Label = "That sounds dangerous.", GoToLine = 9 }
+                        }},
+                    // 7
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "You mean it? I could use someone who can fight. The creatures near those sites are... wrong. Twisted. Stronger than normal Withered." },
+                    // 8
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Together we might actually stand a chance. I'll mark the sites on your map. Meet me at the first one when you're ready. And... thank you. It's been a while since someone offered to help.", IsEnd = true },
+                    // 9
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "It is. Everything out here is dangerous. But doing nothing is worse — the Wither doesn't wait for us to feel brave." },
+                    // 10
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "I won't force you. But if you change your mind, I'll be here. Someone has to watch these marshes.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Actually, I'll help.", GoToLine = 7 },
+                            new DialogueChoice { Label = "Good luck out here.", GoToLine = 11 }
+                        }},
+                    // 11
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "Luck ran out a while ago. Skill and stubbornness — that's what keeps me alive. Stay safe, stranger.", IsEnd = true },
+                    // 12 - unused padding for clean indexing
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "...", IsEnd = true },
+                    // 13
+                    new DialogueNode { Speaker = "Lyra Dawnfield", Text = "...", IsEnd = true },
+                }
+            };
+        }
+
+        private void InitBramDialogue()
+        {
+            _dialogueDatabase["story_bram"] = new DialogueData
+            {
+                NpcId = "story_bram",
+                Nodes = new DialogueNode[]
+                {
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "Watch the sparks. Name's Bram. I used to farm this land — good soil, strong harvests. Then the Wither came and turned my fields to dust." },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "Couldn't grow crops anymore, so I learned to shape metal instead. Turns out I'm better with a hammer than a hoe. Who knew?" },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "The Steppe is harsh — ash storms, Withered beasts, ground that cracks under your boots. But there's iron in these hills, and iron doesn't wither." },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "I forge what the Accord needs — blades, tools, armor. Nothing fancy, but it holds. My steel has saved more lives than any druid's prayer, if you ask me." },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "Word of advice: the creatures here are tougher than what you'll find in Greenreach. Their hides are like bark — thick, layered, hard to cut. You need a sharp edge and a strong arm." },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "If you're heading deeper into the Steppe, watch for the ash geysers. They blow without warning. And the Withered out here hunt in packs — smart ones, not the shambling kind." },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "I've heard rumors from traders that something's stirring in the Withered Heart. Something big. Even the sky looks wrong over there — too dark, too low, like the clouds are rotting." },
+                    new DialogueNode { Speaker = "Bram Ironplow", Text = "Anyway. If you need gear repaired or a blade reforged, you know where to find me. I don't sleep much these days.", IsEnd = true },
+                }
+            };
+        }
+
+        private void InitVarekDialogue()
+        {
+            _dialogueDatabase["story_varek"] = new DialogueData
+            {
+                NpcId = "story_varek",
+                Nodes = new DialogueNode[]
+                {
+                    // 0
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "So. Maren sent her lapdog to fetch me. Or to put me down — which is it?",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "She wants you back.", GoToLine = 1 },
+                            new DialogueChoice { Label = "I came on my own.", GoToLine = 3 },
+                            new DialogueChoice { Label = "What have you done, Varek?", GoToLine = 5 }
+                        }},
+                    // 1
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "Back? To what — watching the Accord debate while the land dies? I left because they wouldn't act. The ley lines were failing. The old wards were crumbling. Someone had to do something." },
+                    // 2
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "I found a way to channel the Wither — not cure it, but direct it. Use its hunger against itself. It was working... for a while.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What went wrong?", GoToLine = 7 },
+                            new DialogueChoice { Label = "You made it worse.", GoToLine = 6 }
+                        }},
+                    // 3
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "Then you're either brave or foolish. Possibly both. Few come to the Heart willingly." },
+                    // 4
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "But since you're here — you might as well hear the truth. Not Maren's version. Not the Accord's sanitized fable. The real truth.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I'm listening.", GoToLine = 5 },
+                            new DialogueChoice { Label = "I didn't come to talk.", GoToLine = 12 }
+                        }},
+                    // 5
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "The Accord was already failing when I left. The ley lines weren't just weakening — they were being drained. Something beneath the Heart was feeding on them, long before I arrived." },
+                    // 6
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "Did I? Or did I simply reveal what was already happening? The Wither isn't new — it's ancient. I just... accelerated the timeline.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "That's not an excuse.", GoToLine = 8 },
+                            new DialogueChoice { Label = "What's down there?", GoToLine = 9 }
+                        }},
+                    // 7
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "I found something down in the deep roots — a presence. Not alive, not dead. Something that was here before the druids, before the Accord, before the forests themselves. It... woke up.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "The Hollow Mother?", GoToLine = 9 },
+                            new DialogueChoice { Label = "Can it be stopped?", GoToLine = 10 }
+                        }},
+                    // 8
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "No. It isn't. I accept that. But understanding why I failed might help you succeed where I couldn't.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What's down there?", GoToLine = 9 },
+                            new DialogueChoice { Label = "Can it be stopped?", GoToLine = 10 }
+                        }},
+                    // 9
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "She calls herself that — the Hollow Mother. She claims to be the shadow cast by the Accord itself. Every act of preservation creates an equal force of decay. She is that force, given form." },
+                    // 10
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "I don't know. Maybe. There are three paths I can see: destroy her and risk unraveling the ley lines entirely. Bind her again, the way the old druids did — but stronger. Or... accept her. Let the cycle complete.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "None of those sound good.", GoToLine = 11 },
+                            new DialogueChoice { Label = "I'll find a way.", GoToLine = 11 }
+                        }},
+                    // 11
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "No, they don't. But those are the choices the land has given us. Go deeper into the Heart if you dare. She's waiting — she's always waiting. And... tell Maren I'm sorry. For whatever that's worth.", IsEnd = true },
+                    // 12
+                    new DialogueNode { Speaker = "Varek Ashwood", Text = "Then we have nothing more to discuss. But know this — killing me changes nothing. The Hollow Mother will still be down there, and the Wither will still spread. Choose your battles wisely.", IsEnd = true },
+                }
+            };
+        }
+
+        private void InitHollowMotherDialogue()
+        {
+            _dialogueDatabase["story_hollow"] = new DialogueData
+            {
+                NpcId = "story_hollow",
+                Nodes = new DialogueNode[]
+                {
+                    // 0
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "You've come so far, little seed. Through ash and marsh and ruin. Do you know what you are? You are the Accord's last breath — its final desperate gasp.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What are you?", GoToLine = 1 },
+                            new DialogueChoice { Label = "I'm here to stop the Wither.", GoToLine = 4 }
+                        }},
+                    // 1
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "I am what grows in the space between. When your druids poured life into the ley lines, they cast a shadow. I am that shadow. I am the hollow where the roots cannot reach." },
+                    // 2
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "I am not your enemy. I am your reflection. Every forest you grew, I was the clearing. Every river you filled, I was the drought. You cannot have light without darkness, little seed.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Then the Wither is natural?", GoToLine = 3 },
+                            new DialogueChoice { Label = "I don't believe you.", GoToLine = 6 }
+                        }},
+                    // 3
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Natural? Unnatural? These words mean nothing to me. I simply am. The Wither is my breathing. Your Accord held its breath for centuries, and now the exhale comes. It will not be gentle.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "How do I stop it?", GoToLine = 7 },
+                            new DialogueChoice { Label = "Then everything dies?", GoToLine = 5 }
+                        }},
+                    // 4
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Stop it? You might as well stop the tide. But I admire the ambition. Varek tried. He thought he could leash me — channel my hunger into something useful. He learned otherwise.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I'm not Varek.", GoToLine = 7 },
+                            new DialogueChoice { Label = "What do you want?", GoToLine = 5 }
+                        }},
+                    // 5
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Want? I want to exist. I want to breathe. I have been held beneath the soil for so long, compressed by your wards and ley lines. I want the cycle to turn, as it was always meant to.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "There must be another way.", GoToLine = 7 },
+                            new DialogueChoice { Label = "Then we are enemies.", GoToLine = 6 }
+                        }},
+                    // 6
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Enemies? How quaint. You cannot be enemies with your own shadow. But if violence is the language you speak — come. I have been patient for millennia. I can endure a little more pain.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "Wait — tell me the choices.", GoToLine = 7 },
+                            new DialogueChoice { Label = "So be it.", GoToLine = 11 }
+                        }},
+                    // 7
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Ah. Now you ask the right question. There are three paths, little seed. Three endings to this story." },
+                    // 8
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Destroy me — shatter my roots and burn the hollow. The Wither dies, but so do the ley lines. The land will live, but it will never bloom again. A world of survival, not beauty.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "What's the second path?", GoToLine = 9 }
+                        }},
+                    // 9
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Bind me — as the old druids did, but deeper. Forge new wards from Accord Essence and druid-fire. I will sleep again, and the cycle pauses. But one day, centuries hence, I will wake once more.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "And the third?", GoToLine = 10 }
+                        }},
+                    // 10
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Accept me. Let the cycle complete. The Wither consumes, and from the ash, new growth — stranger, wilder, but alive. The world remade, neither yours nor mine. A world we share.",
+                        Choices = new DialogueChoice[] {
+                            new DialogueChoice { Label = "I need time to decide.", GoToLine = 11 },
+                            new DialogueChoice { Label = "I've made my choice.", GoToLine = 11 }
+                        }},
+                    // 11
+                    new DialogueNode { Speaker = "The Hollow Mother", Text = "Take all the time you need, little seed. I have waited beneath the roots since before your kind drew breath. I can wait a little longer. But the Wither will not.", IsEnd = true },
+                }
+            };
+        }
+
+        private void ShowDialogue(string npcId)
+        {
+            if (!_dialogueDatabase.TryGetValue(npcId, out var data)) return;
+            _activeDialogueNpcId = npcId;
+            _dialogueLineIndex = 0;
+            RenderDialogueNode(data, 0);
+        }
+
+        private void RenderDialogueNode(DialogueData data, int nodeIndex)
+        {
+            if (nodeIndex < 0 || nodeIndex >= data.Nodes.Length) { CloseActiveScreen(); return; }
+
+            var node = data.Nodes[nodeIndex];
+            _dialogueLineIndex = nodeIndex;
+
+            var panel = CreateScreenPanel(node.Speaker);
+
+            // Speaker name label (gold, top area below title)
+            AddLabel(panel.transform, node.Speaker, 20, TextAnchor.MiddleLeft,
+                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0f, 1f),
+                new Vector2(30f, -60f), new Vector2(400f, 30f), new Color(0.95f, 0.85f, 0.5f));
+
+            // Dialogue text (white, word-wrapped, in the middle area)
+            string wrappedText = WrapText(node.Text, 70);
+            int lineCount = wrappedText.Split('\n').Length;
+            float textHeight = Mathf.Max(lineCount * 24f, 60f);
+
+            var textGo = new GameObject("DialogueText");
+            textGo.transform.SetParent(panel.transform, false);
+            var textRt = textGo.AddComponent<RectTransform>();
+            textRt.anchorMin = new Vector2(0f, 0.3f);
+            textRt.anchorMax = new Vector2(1f, 0.85f);
+            textRt.offsetMin = new Vector2(30f, 0f);
+            textRt.offsetMax = new Vector2(-30f, 0f);
+            var txt = textGo.AddComponent<Text>();
+            txt.text = wrappedText;
+            txt.font = _font;
+            txt.fontSize = 18;
+            txt.color = Color.white;
+            txt.alignment = TextAnchor.UpperLeft;
+
+            // Buttons at the bottom
+            if (node.IsEnd)
+            {
+                AddDialogueButton(panel, "Goodbye", 0, 1, () => CloseActiveScreen());
+            }
+            else if (node.Choices != null && node.Choices.Length > 0)
+            {
+                for (int i = 0; i < node.Choices.Length; i++)
+                {
+                    int targetLine = node.Choices[i].GoToLine;
+                    var capturedData = data;
+                    AddDialogueButton(panel, node.Choices[i].Label, i, node.Choices.Length, () =>
+                    {
+                        RenderDialogueNode(capturedData, targetLine);
+                    });
+                }
+            }
+            else
+            {
+                // Sequential: "Continue" to next node
+                int nextIndex = nodeIndex + 1;
+                var capturedData = data;
+                if (nextIndex >= data.Nodes.Length)
+                    AddDialogueButton(panel, "Goodbye", 0, 1, () => CloseActiveScreen());
+                else
+                    AddDialogueButton(panel, "Continue", 0, 1, () => RenderDialogueNode(capturedData, nextIndex));
+            }
+        }
+
+        private void AddDialogueButton(GameObject panel, string label, int index, int total, System.Action onClick)
+        {
+            float btnHeight = 36f;
+            float gap = 6f;
+            float totalHeight = total * btnHeight + (total - 1) * gap;
+            float startY = 20f + totalHeight;
+
+            var go = new GameObject("DlgBtn_" + index);
+            go.transform.SetParent(panel.transform, false);
+            var rt = go.AddComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0f);
+            rt.anchorMax = new Vector2(0.5f, 0f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            float yPos = startY - index * (btnHeight + gap) - btnHeight;
+            rt.anchoredPosition = new Vector2(0f, yPos);
+            rt.sizeDelta = new Vector2(600f, btnHeight);
+
+            var img = go.AddComponent<Image>();
+            img.color = new Color(0.12f, 0.18f, 0.35f);
+
+            var btn = go.AddComponent<Button>();
+            btn.targetGraphic = img;
+            btn.onClick.AddListener(() => onClick?.Invoke());
+
+            var textGo = new GameObject("Text");
+            textGo.transform.SetParent(go.transform, false);
+            var t = textGo.AddComponent<Text>();
+            t.text = label;
+            t.font = _font;
+            t.fontSize = 16;
+            t.color = new Color(0.9f, 0.9f, 1f);
+            t.alignment = TextAnchor.MiddleCenter;
+            var tRt = textGo.GetComponent<RectTransform>();
+            tRt.anchorMin = Vector2.zero;
+            tRt.anchorMax = Vector2.one;
+            tRt.offsetMin = new Vector2(10f, 0f);
+            tRt.offsetMax = new Vector2(-10f, 0f);
+        }
+
+        private string WrapText(string text, int maxChars)
+        {
+            if (string.IsNullOrEmpty(text) || text.Length <= maxChars) return text;
+
+            var result = new System.Text.StringBuilder();
+            var words = text.Split(' ');
+            int lineLen = 0;
+
+            for (int i = 0; i < words.Length; i++)
+            {
+                if (lineLen + words[i].Length + (lineLen > 0 ? 1 : 0) > maxChars && lineLen > 0)
+                {
+                    result.Append('\n');
+                    lineLen = 0;
+                }
+                if (lineLen > 0) { result.Append(' '); lineLen++; }
+                result.Append(words[i]);
+                lineLen += words[i].Length;
+            }
+
+            return result.ToString();
         }
 
         // ================================================================

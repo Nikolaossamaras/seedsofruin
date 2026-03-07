@@ -521,6 +521,14 @@ namespace SoR.Testing
             SpawnNPC("Quartermaster Voss",  "guild_quartermaster", "Guild Quartermaster",  new Vector3(6f, 0f, -15f),   new Color(0.45f, 0.6f, 0.8f));
             SpawnNPC("Druid Enna",          "wandering_druid",     "Wandering Druid",      new Vector3(-8f, 0f, -22f),  new Color(0.3f, 0.7f, 0.65f));
             SpawnNPC("The Whisperer",       "black_market",        "Black Market",         new Vector3(8f, 0f, -22f),   new Color(0.45f, 0.2f, 0.55f));
+
+            // ---- Story NPCs ----
+            SpawnNPC("Maren Ashveil",       "story_maren",   "Guild Master",          new Vector3(3f, 0f, 2f),      new Color(0.55f, 0.75f, 0.45f));
+            SpawnNPC("Silas Rootweaver",    "story_silas",   "Traveling Herbalist",   new Vector3(25f, 0f, -10f),   new Color(0.25f, 0.65f, 0.25f));
+            SpawnNPC("Lyra Dawnfield",      "story_lyra",    "Ranger",                new Vector3(50f, 0f, -50f),   new Color(0.4f, 0.7f, 0.85f));
+            SpawnNPC("Bram Ironplow",       "story_bram",    "Master Blacksmith",     new Vector3(-50f, 0f, -50f),  new Color(0.75f, 0.45f, 0.2f));
+            SpawnNPC("Varek Ashwood",       "story_varek",   "Archdruid",             new Vector3(50f, 0f, 50f),    new Color(0.5f, 0.15f, 0.3f));
+            SpawnNPC("The Hollow Mother",   "story_hollow",  "???",                   new Vector3(65f, 0f, 65f),    new Color(0.2f, 0.05f, 0.15f));
         }
 
         private void SpawnNPC(string npcName, string shopId, string shopRole, Vector3 position, Color color)
