@@ -5496,7 +5496,7 @@ namespace SoR.Testing
 
             // ---- SECTION 2: Stats with +/- buttons ----
             AddRowLabel(content, "  --- Stats ---", row, headerColor); row++;
-            AddRowLabel(content, $"  {'Abbr',-5} {'Stat',-12} {'Value',6}  {'Allocated',9}  Effect", row, new Color(0.7f, 0.7f, 0.7f)); row++;
+            AddRowLabel(content, $"  {"Abbr",-5} {"Stat",-12} {"Value",6}  {"Allocated",9}  Effect", row, new Color(0.7f, 0.7f, 0.7f)); row++;
 
             var statInfo = new[]
             {
