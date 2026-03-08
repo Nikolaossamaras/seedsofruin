@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
 using SoR.Core;
@@ -11,6 +12,7 @@ using SoR.Systems.Shop;
 using SoR.Systems.Quests;
 using SoR.Gameplay;
 using SoR.UI;
+using SoR.UI.Crafting;
 using UnityEngine.EventSystems;
 using SoR.Progression;
 
@@ -76,6 +78,10 @@ namespace SoR.Testing
         // ---- gacha roulette ----
         private GachaRouletteUI _roulette;
         private bool _isGachaAnimating;
+
+        // ---- crafting timing minigame ----
+        private CraftingTimingUI _craftingTiming;
+        private bool _isCraftingMinigame;
 
         // ---- persistent HUD elements ----
         private ItemNotificationUI _notificationUI;
@@ -599,6 +605,51 @@ namespace SoR.Testing
             _testRecipes.Add(CreateRecipe("Apprentice's Druid Staff", "apprentice_staff",
                 CraftingDiscipline.Herbalism, 4,
                 ("ancient_seed", 2), ("herb_bundle", 10), ("runic_dust", 3)));
+
+            // --- GDD Crafting Ingredients ---
+            _inventory.AddItem("sunleaf", 5);
+            _inventory.AddItem("spring_water", 3);
+            _inventory.AddItem("moonpetal", 2);
+            _inventory.AddItem("glowcap", 4);
+            _inventory.AddItem("dewdrop", 3);
+            _inventory.AddItem("iron_ingot", 6);
+            _inventory.AddItem("withered_heartwood", 2);
+            _inventory.AddItem("leather_grip", 3);
+            _inventory.AddItem("steel_plate", 4);
+            _inventory.AddItem("brambleshell", 3);
+            _inventory.AddItem("rune_thread", 2);
+            _inventory.AddItem("guardian_seed", 2);
+            _inventory.AddItem("fertile_soil", 3);
+            _inventory.AddItem("verdance_crystal", 2);
+            _inventory.AddItem("purification_seed", 2);
+            _inventory.AddItem("accord_dust", 4);
+            _inventory.AddItem("holy_water", 2);
+            _inventory.AddItem("rune_fragment", 5);
+            _inventory.AddItem("amber_shard", 2);
+            _inventory.AddItem("accord_fragment", 2);
+
+            // --- GDD Recipes ---
+            _testRecipes.Add(CreateRecipe("Vitality Tonic", "vitality_tonic",
+                CraftingDiscipline.Herbalism, 1,
+                ("sunleaf", 2), ("spring_water", 1)));
+            _testRecipes.Add(CreateRecipe("Verdance Elixir", "verdance_elixir",
+                CraftingDiscipline.Herbalism, 2,
+                ("moonpetal", 1), ("glowcap", 2), ("dewdrop", 1)));
+            _testRecipes.Add(CreateRecipe("Ironroot Blade", "ironroot_blade",
+                CraftingDiscipline.Forging, 3,
+                ("iron_ingot", 3), ("withered_heartwood", 1), ("leather_grip", 1)));
+            _testRecipes.Add(CreateRecipe("Thornguard Plate", "thornguard_plate",
+                CraftingDiscipline.Forging, 4,
+                ("steel_plate", 2), ("brambleshell", 2), ("rune_thread", 1)));
+            _testRecipes.Add(CreateRecipe("Sentry Seedling", "sentry_seedling",
+                CraftingDiscipline.Seedcraft, 2,
+                ("guardian_seed", 1), ("fertile_soil", 1), ("verdance_crystal", 1)));
+            _testRecipes.Add(CreateRecipe("Blight Ward", "blight_ward",
+                CraftingDiscipline.Seedcraft, 3,
+                ("purification_seed", 1), ("accord_dust", 2), ("holy_water", 1)));
+            _testRecipes.Add(CreateRecipe("Rune of the Harvest", "rune_of_harvest",
+                CraftingDiscipline.Runebinding, 4,
+                ("rune_fragment", 3), ("amber_shard", 1), ("accord_fragment", 1)));
 
             // --- Shops (all 6 GDD shops) ---
             SeedAllShops();
@@ -1881,6 +1932,13 @@ namespace SoR.Testing
                 _isGachaAnimating = false;
             }
 
+            if (_craftingTiming != null)
+            {
+                _craftingTiming.Dismiss();
+                _craftingTiming = null;
+                _isCraftingMinigame = false;
+            }
+
             if (_activeScreen != null)
             {
                 Destroy(_activeScreen);
@@ -2143,39 +2201,79 @@ namespace SoR.Testing
             var panel = CreateScreenPanel("Crafting");
             var content = CreateScrollContent(panel.transform, new Vector2(0f, 0f), new Vector2(1f, 0.9f));
 
-            // Discipline levels header
-            AddRowLabel(content, $"  Herbalism Lv{_crafting.GetDisciplineLevel(CraftingDiscipline.Herbalism)}  |  Forging Lv{_crafting.GetDisciplineLevel(CraftingDiscipline.Forging)}  |  Seedcraft Lv{_crafting.GetDisciplineLevel(CraftingDiscipline.Seedcraft)}  |  Runebinding Lv{_crafting.GetDisciplineLevel(CraftingDiscipline.Runebinding)}", 0, new Color(0.7f, 0.85f, 1f));
-            AddRowLabel(content, "", 1, Color.white);
+            // Discipline levels header with lock indicators
+            string discHeader = "";
+            foreach (CraftingDiscipline disc in System.Enum.GetValues(typeof(CraftingDiscipline)))
+            {
+                if (discHeader.Length > 0) discHeader += "  |  ";
+                bool unlocked = CraftingSystem.IsDisciplineUnlocked(disc, _playerLevel);
+                if (unlocked)
+                    discHeader += $"{disc} Lv{_crafting.GetDisciplineLevel(disc)}";
+                else
+                    discHeader += $"{disc} [Locked Lv{CraftingSystem.GetDisciplineUnlockLevel(disc)}]";
+            }
+            AddRowLabel(content, $"  {discHeader}", 0, new Color(0.7f, 0.85f, 1f));
 
-            int row = 2;
+            // Harvest stat info row
+            float harvest = _allocatedStats.Harvest;
+            int maxQuality = QualityCalculator.HarvestCeiling(harvest);
+            AddRowLabel(content, $"  Harvest: {harvest:F0}  |  Max Quality: {QualityCalculator.QualityName(maxQuality)} ({QualityCalculator.QualityStars(maxQuality)})", 1, new Color(0.85f, 0.75f, 0.5f));
+
+            int row = 3;
             foreach (var recipe in _testRecipes)
             {
-                bool canCraft = _crafting.CanCraft(recipe);
-                Color color = canCraft ? new Color(0.5f, 1f, 0.5f) : new Color(0.6f, 0.4f, 0.4f);
+                bool disciplineUnlocked = CraftingSystem.IsDisciplineUnlocked(recipe.Discipline, _playerLevel);
+                bool canCraft = _crafting.CanCraft(recipe, _playerLevel);
 
                 string ingredients = "";
                 foreach (var ing in recipe.Ingredients)
                     ingredients += $"{FormatItemName(ing.ItemId)} x{ing.Quantity}  ";
 
-                AddRowLabel(content, $"  {recipe.RecipeName}  [{recipe.Discipline}]  Lv{recipe.RequiredSkillLevel}", row, color);
-                row++;
-                AddRowLabel(content, $"    Needs: {ingredients}", row, new Color(0.7f, 0.7f, 0.7f));
-
-                // Craft button
-                var capturedRecipe = recipe;
-                AddButton(content, "Craft", row, () =>
+                if (!disciplineUnlocked)
                 {
-                    if (_crafting.Craft(capturedRecipe))
-                    {
-                        if (_weaponDefs.ContainsKey(capturedRecipe.OutputItemId))
-                            _ownedWeapons.Add(capturedRecipe.OutputItemId);
-                        Debug.Log($"[Crafting] Crafted {capturedRecipe.RecipeName}");
-                        CloseActiveScreen();
-                        ShowCrafting(); // Refresh
-                    }
-                });
+                    // Locked discipline — grayed out
+                    int unlockLv = CraftingSystem.GetDisciplineUnlockLevel(recipe.Discipline);
+                    AddRowLabel(content, $"  {recipe.RecipeName}  [{recipe.Discipline}]  Lv{recipe.RequiredSkillLevel}  (Unlocks at Player Lv {unlockLv})", row, new Color(0.4f, 0.4f, 0.4f));
+                    row++;
+                    AddRowLabel(content, $"    Needs: {ingredients}", row, new Color(0.35f, 0.35f, 0.35f));
+                    row++;
+                }
+                else
+                {
+                    Color color = canCraft ? new Color(0.5f, 1f, 0.5f) : new Color(0.6f, 0.4f, 0.4f);
+                    AddRowLabel(content, $"  {recipe.RecipeName}  [{recipe.Discipline}]  Lv{recipe.RequiredSkillLevel}", row, color);
+                    row++;
+                    AddRowLabel(content, $"    Needs: {ingredients}", row, new Color(0.7f, 0.7f, 0.7f));
 
-                row++;
+                    // Craft button — launches timing minigame
+                    var capturedRecipe = recipe;
+                    AddButton(content, "Craft", row, () =>
+                    {
+                        if (!_crafting.CanCraft(capturedRecipe, _playerLevel)) return;
+                        if (_isCraftingMinigame) return;
+
+                        _isCraftingMinigame = true;
+                        if (_craftingTiming == null)
+                            _craftingTiming = CraftingTimingUI.Create(_canvas, _font);
+
+                        _craftingTiming.Begin(timingBonus =>
+                        {
+                            _isCraftingMinigame = false;
+                            float h = _allocatedStats.Harvest;
+                            int quality = _crafting.Craft(capturedRecipe, _playerLevel, h, timingBonus);
+                            if (quality >= 0)
+                            {
+                                if (_weaponDefs.ContainsKey(capturedRecipe.OutputItemId))
+                                    _ownedWeapons.Add(capturedRecipe.OutputItemId);
+                                Debug.Log($"[Crafting] Crafted {capturedRecipe.RecipeName} — {QualityCalculator.QualityName(quality)} {QualityCalculator.QualityStars(quality)}");
+                            }
+                            CloseActiveScreen();
+                            ShowCrafting(); // Refresh
+                        });
+                    });
+
+                    row++;
+                }
             }
 
             SetContentHeight(content, row);
@@ -4531,7 +4629,9 @@ namespace SoR.Testing
             foreach (CraftingDiscipline disc in System.Enum.GetValues(typeof(CraftingDiscipline)))
             {
                 int lvl = _crafting.GetDisciplineLevel(disc);
-                AddRowLabel(content, $"  {disc}: Lv {lvl}", row, cheatColor);
+                bool unlocked = CraftingSystem.IsDisciplineUnlocked(disc, _playerLevel);
+                string lockTag = unlocked ? "" : $" [Locked Lv{CraftingSystem.GetDisciplineUnlockLevel(disc)}]";
+                AddRowLabel(content, $"  {disc}: Lv {lvl}{lockTag}", row, cheatColor);
                 var capturedDisc = disc;
                 AddButton(content, "Max", row, () =>
                 {
@@ -4540,6 +4640,30 @@ namespace SoR.Testing
                     CloseActiveScreen(); ShowCheatMenu();
                 }); row++;
             }
+
+            AddRowLabel(content, "  Set all discipline levels", row, cheatColor);
+            AddCheatValueButtons(content, row, new float[] { 1, 10, 25, 50 }, v =>
+            {
+                foreach (CraftingDiscipline disc in System.Enum.GetValues(typeof(CraftingDiscipline)))
+                    _crafting.SetDisciplineLevel(disc, (int)v);
+                Debug.Log($"[Cheat] All disciplines set to Lv {(int)v}");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
+
+            AddRowLabel(content, "  Give all crafting materials (x20 each)", row, cheatColor);
+            AddButton(content, "Give", row, () =>
+            {
+                string[] mats = { "sunleaf", "spring_water", "moonpetal", "glowcap", "dewdrop",
+                    "iron_ingot", "withered_heartwood", "leather_grip", "steel_plate", "brambleshell",
+                    "rune_thread", "guardian_seed", "fertile_soil", "verdance_crystal", "purification_seed",
+                    "accord_dust", "holy_water", "rune_fragment", "amber_shard", "accord_fragment",
+                    "herb_bundle", "iron_ore", "fire_crystal", "silk_thread", "runic_dust",
+                    "ancient_seed", "moonstone", "verdance_shard" };
+                foreach (var m in mats)
+                    _inventory.AddItem(m, 20);
+                Debug.Log("[Cheat] Gave 20x of all crafting materials");
+                CloseActiveScreen(); ShowCheatMenu();
+            }); row++;
 
             AddRowLabel(content, "", row, Color.white); row++;
 

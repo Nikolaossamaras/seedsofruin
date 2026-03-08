@@ -12,6 +12,15 @@ namespace SoR.Systems.Crafting
 
         private InventorySystem _inventory;
 
+        // GDD discipline unlock levels (player level required)
+        private static readonly Dictionary<CraftingDiscipline, int> DisciplineUnlockLevels = new()
+        {
+            { CraftingDiscipline.Herbalism, 1 },
+            { CraftingDiscipline.Forging, 8 },
+            { CraftingDiscipline.Seedcraft, 14 },
+            { CraftingDiscipline.Runebinding, 22 }
+        };
+
         public void Initialize()
         {
             _inventory = ServiceLocator.Resolve<InventorySystem>();
@@ -32,9 +41,40 @@ namespace SoR.Systems.Crafting
             _disciplineXP.Clear();
         }
 
+        /// <summary>
+        /// Returns the player level required to unlock a discipline.
+        /// </summary>
+        public static int GetDisciplineUnlockLevel(CraftingDiscipline discipline)
+        {
+            return DisciplineUnlockLevels.TryGetValue(discipline, out int level) ? level : 1;
+        }
+
+        /// <summary>
+        /// Returns true if the discipline is unlocked at the given player level.
+        /// </summary>
+        public static bool IsDisciplineUnlocked(CraftingDiscipline discipline, int playerLevel)
+        {
+            return playerLevel >= GetDisciplineUnlockLevel(discipline);
+        }
+
+        /// <summary>
+        /// Original CanCraft — no player-level lock check (backward compat).
+        /// </summary>
         public bool CanCraft(RecipeDefinitionSO recipe)
         {
+            return CanCraft(recipe, int.MaxValue);
+        }
+
+        /// <summary>
+        /// CanCraft with player-level discipline unlock check.
+        /// </summary>
+        public bool CanCraft(RecipeDefinitionSO recipe, int playerLevel)
+        {
             if (recipe == null)
+                return false;
+
+            // Check discipline unlock
+            if (!IsDisciplineUnlocked(recipe.Discipline, playerLevel))
                 return false;
 
             // Check skill level requirement
@@ -51,10 +91,23 @@ namespace SoR.Systems.Crafting
             return true;
         }
 
+        /// <summary>
+        /// Original Craft — backward compat, no timing minigame.
+        /// </summary>
         public bool Craft(RecipeDefinitionSO recipe)
         {
-            if (!CanCraft(recipe))
-                return false;
+            int quality = Craft(recipe, int.MaxValue, 0f, 0.5f);
+            return quality >= 0;
+        }
+
+        /// <summary>
+        /// Craft with player level, harvest stat, and timing bonus.
+        /// Returns quality (1-5) on success, -1 on failure.
+        /// </summary>
+        public int Craft(RecipeDefinitionSO recipe, int playerLevel, float harvestStat, float timingBonus)
+        {
+            if (!CanCraft(recipe, playerLevel))
+                return -1;
 
             // Remove ingredients
             foreach (var ingredient in recipe.Ingredients)
@@ -62,9 +115,9 @@ namespace SoR.Systems.Crafting
                 _inventory.RemoveItem(ingredient.ItemId, ingredient.Quantity);
             }
 
-            // Calculate quality based on average ingredient quality and discipline level
+            // Calculate quality
             int disciplineLevel = GetDisciplineLevel(recipe.Discipline);
-            int quality = QualityCalculator.CalculateQuality(0f, disciplineLevel, 3);
+            int quality = QualityCalculator.CalculateQuality(harvestStat, disciplineLevel, timingBonus);
 
             // Produce output
             _inventory.AddItem(recipe.OutputItemId, recipe.OutputQuantity);
@@ -72,13 +125,21 @@ namespace SoR.Systems.Crafting
             // Grant crafting XP
             AddDisciplineXP(recipe.Discipline, recipe.RequiredSkillLevel * 10);
 
-            Debug.Log($"[CraftingSystem] Crafted {recipe.RecipeName} (Quality: {quality} stars).");
-            return true;
+            Debug.Log($"[CraftingSystem] Crafted {recipe.RecipeName} — {QualityCalculator.QualityName(quality)} {QualityCalculator.QualityStars(quality)}");
+            return quality;
         }
 
         public int GetDisciplineLevel(CraftingDiscipline discipline)
         {
             return _disciplineLevels.TryGetValue(discipline, out int level) ? level : 1;
+        }
+
+        /// <summary>
+        /// Directly sets a discipline level (for cheat menu).
+        /// </summary>
+        public void SetDisciplineLevel(CraftingDiscipline discipline, int level)
+        {
+            _disciplineLevels[discipline] = Mathf.Clamp(level, 1, 100);
         }
 
         public void AddDisciplineXP(CraftingDiscipline discipline, int xp)
